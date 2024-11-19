@@ -7,3 +7,6 @@ type Key64 uint64
 type Value64 uint64
 
 // 其他需要的常量或函数可以在这里定义。
+const (
+	EntryNum = 32
+)

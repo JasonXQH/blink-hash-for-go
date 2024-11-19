@@ -1,7 +1,5 @@
 package blinkhash
 
-const EntryNum = 32 // 使用大写字母使其成为导出常量
-
 // Entry 是一个泛型结构，在 Go 中通过使用 interface{} 来模拟泛型。
 type Entry struct {
 	Key   interface{}
