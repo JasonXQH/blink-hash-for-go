@@ -19,7 +19,7 @@ const (
 type HashFunction func(data []byte, seed uint64) uint64
 
 // Jenkins hash function in Go
-func jenkins(data []byte, seed uint64) uint64 {
+func Jenkins(data []byte, seed uint64) uint64 {
 	var hash uint64 = seed
 	for _, b := range data {
 		hash += uint64(b)
@@ -33,7 +33,7 @@ func jenkins(data []byte, seed uint64) uint64 {
 }
 
 // MurmurHash2 in Go
-func murmur2(data []byte, seed uint64) uint64 {
+func Murmur2(data []byte, seed uint64) uint64 {
 	var (
 		m uint32 = 0x5bd1e995
 		r        = 24
@@ -70,14 +70,14 @@ func murmur2(data []byte, seed uint64) uint64 {
 	return uint64(h)
 }
 
-func xxhash(data []byte, seed uint64) uint64 {
+func Xxhash(data []byte, seed uint64) uint64 {
 	if uintptr(unsafe.Pointer(&data[0]))&7 == 0 {
 		return hashCompute(data, uint64(len(data)), seed)
 	}
 	return hashCompute(data, uint64(len(data)), seed)
 }
 
-func standard(data []byte, seed uint64) uint64 {
+func Standard(data []byte, seed uint64) uint64 {
 	h := fnv.New64a()
 	h.Write(data)
 	return h.Sum64() ^ seed
@@ -112,10 +112,10 @@ func hashCompute(data []byte, length, seed uint64) uint64 {
 }
 
 var hashFunctions = []HashFunction{
-	standard, // This should be replaced by an actual implementation
-	murmur2,
-	jenkins,
-	xxhash, // Assume xxhash has been implemented
+	Standard, // This should be replaced by an actual implementation
+	Murmur2,
+	Jenkins,
+	Xxhash, // Assume xxhash has been implemented
 }
 
 // General hash function selector
