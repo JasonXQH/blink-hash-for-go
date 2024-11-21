@@ -82,3 +82,33 @@ func BenchmarkNodeLocking(b *testing.B) {
 		}
 	})
 }
+
+func TestBatchBuffer(t *testing.T) {
+	// 模拟缓冲区数据
+	buf := []Entry{
+		{Key: "key1", Value: &Node{}},
+		{Key: "key2", Value: &Node{}},
+		{Key: "key3", Value: &Node{}},
+		{Key: "key4", Value: &Node{}},
+	}
+	bufIdx := 0
+	bufNum := len(buf)
+	batchSize := 2
+
+	// 创建一个 INode
+	inode := NewINode(1, nil, nil, nil)
+
+	// 执行 BatchBuffer
+	inode.BatchBuffer(buf, &bufIdx, bufNum, batchSize)
+
+	// 验证结果
+	if inode.count != batchSize {
+		t.Errorf("Expected count to be %d, got %d", batchSize, inode.count)
+	}
+	if inode.HighKey != "key3" {
+		t.Errorf("Expected HighKey to be 'key3', got %v", inode.HighKey)
+	}
+	if bufIdx != 2 {
+		t.Errorf("Expected bufIdx to be 2, got %d", bufIdx)
+	}
+}
