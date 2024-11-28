@@ -160,10 +160,11 @@ func TestINode_CalculateNodeNum(t *testing.T) {
 	var remains = 5
 	var lastChunk, newNum int
 	batchSize := 10
-	cardinality := 15
 
-	inode := &INode{}
-	inode.CalculateNodeNum(totalNum, &numerator, &remains, &lastChunk, &newNum, batchSize, cardinality)
+	inode := &INode{
+		Cardinality: 15,
+	}
+	inode.CalculateNodeNum(totalNum, &numerator, &remains, &lastChunk, &newNum, batchSize)
 
 	fmt.Println("Numerator:", numerator)
 	fmt.Println("Remains:", remains)
@@ -202,7 +203,7 @@ func TestINode_BatchInsertWithMigration(t *testing.T) {
 	bufNum := len(buf)
 
 	// 调用 BatchInsertWithMigration
-	inode.BatchInsertWithMigration(
+	inode.BatchInsertWithMigrationAndMoveMent(
 		migrate, &migrateIdx, migrateNum,
 		keys, values, &idx, num,
 		batchSize, buf, &bufIdx, bufNum,
@@ -212,4 +213,38 @@ func TestINode_BatchInsertWithMigration(t *testing.T) {
 	fmt.Printf("Entries: %+v\n", inode.Entries)
 	fmt.Printf("Count: %d\n", inode.count)
 	fmt.Printf("HighKey: %+v\n", inode.HighKey)
+}
+
+func TestINode_BatchInsertLastLevel(t *testing.T) {
+	keys := []interface{}{10, 20, 30}
+	values := make([]*Node, 3)
+	for i := range values {
+		values[i] = &Node{level: 1}
+	}
+
+	inode := NewINode(1, nil, nil, nil)
+	inode.count = 0 // Starting with an empty node for simplicity
+
+	// Assuming an FILL_FACTOR of 0.9 for this example and a high enough cardinality
+	newNum := new(int)
+	expectedNum := 0 // No new nodes should be created
+	*newNum = expectedNum
+
+	resultNodes, err := inode.BatchInsertLastLevel(keys, values, len(keys), newNum)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(resultNodes) != expectedNum {
+		t.Errorf("Expected %d new nodes, got %d", expectedNum, len(resultNodes))
+	}
+	if inode.count != len(keys) {
+		t.Errorf("Expected count %d, got %d", len(keys), inode.count)
+	}
+
+	// Verify keys and values
+	for i, key := range keys {
+		if inode.Entries[i].Key != key || inode.Entries[i].Value != values[i] {
+			t.Errorf("Entry %d did not match expected. Got key %v and value %v", i, inode.Entries[i].Key, inode.Entries[i].Value)
+		}
+	}
 }
