@@ -12,6 +12,10 @@ type Node struct {
 	leftmostPtr *Node
 	count       int
 	level       int
+	Behavior    NodeInterface // 添加接口引用以实现多态
+}
+type NodeInterface interface {
+	SanityCheck(prevHighKey interface{}, first bool)
 }
 
 // NewNode 创建并初始化 Node 结构体实例

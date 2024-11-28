@@ -95,7 +95,7 @@ func (b *LNodeHash) Print() {
 }
 
 func (b *LNodeHash) SanityCheck(key interface{}, first bool) {
-	//TODO implement me
+	fmt.Println("LNodeHash 打印 SanityCheck")
 	panic("implement me")
 }
 

@@ -32,6 +32,7 @@ func NewINode(level int, highKey interface{}, sibling, left *Node) *INode {
 		HighKey:     highKey,
 		Entries:     make([]Entry, cardinality),
 	}
+	inode.Node.Behavior = inode
 	return inode
 }
 
@@ -376,9 +377,9 @@ func (inode *INode) BatchInsertLastLevel(keys []interface{}, values []*Node, num
 		}
 
 		oldSibling := inode.siblingPtr
-		inode.siblingPtr = (*Node)(unsafe.Pointer(newNodes[0]))
+		inode.siblingPtr = &newNodes[0].Node
 		for i := 0; i < newNumValue-1; i++ {
-			newNodes[i].siblingPtr = (*Node)(unsafe.Pointer(newNodes[i+1]))
+			newNodes[i].siblingPtr = &newNodes[i+1].Node
 			newNodes[i].BatchInsertLastLevelWithMigrationAndMovement(migrate, &pos, migrateNum, keys, values, &idx, num, batchSize, buf, &pos, moveNum)
 		}
 		newNodes[newNumValue-1].siblingPtr = oldSibling
@@ -420,9 +421,9 @@ func (inode *INode) BatchInsertLastLevel(keys []interface{}, values []*Node, num
 		}
 
 		oldSibling := inode.siblingPtr
-		inode.siblingPtr = (*Node)(unsafe.Pointer(newNodes[0]))
+		inode.siblingPtr = &newNodes[0].Node
 		for i := 0; i < newNumValue-1; i++ {
-			newNodes[i].siblingPtr = (*Node)(unsafe.Pointer(newNodes[i+1]))
+			newNodes[i].siblingPtr = &newNodes[i+1].Node
 			newNodes[i].BatchInsertLastLevelWithMovement(keys, values, &idx, num, batchSize, buf, &moveIdx, moveNum)
 		}
 		newNodes[newNumValue-1].siblingPtr = oldSibling
@@ -507,12 +508,11 @@ func (inode *INode) SanityCheck(prevHighKey interface{}, first bool) {
 			}
 		}
 	}
-
 	// 如果有 sibling 节点，递归检查下一个节点
 	// siblingPtr 类型强制转换
 	if inode.siblingPtr != nil {
-		siblingINode := (*INode)(unsafe.Pointer(inode.siblingPtr))
-		siblingINode.SanityCheck(inode.HighKey, false)
+		siblingINode := inode.Node.siblingPtr
+		siblingINode.Behavior.SanityCheck(inode.HighKey, false)
 	}
 }
 
@@ -637,7 +637,7 @@ func (inode *INode) BatchInsert(
 
 		// Adjust sibling pointers
 		oldSibling := inode.siblingPtr
-		inode.siblingPtr = (*Node)(unsafe.Pointer(newNodes[0]))
+		inode.siblingPtr = &newNodes[0].Node
 
 		// Insert data into sibling nodes
 		migrateIdx, moveIdx := 0, 0
@@ -645,7 +645,7 @@ func (inode *INode) BatchInsert(
 		inode.HighKey = migrate[migrateIdx].Key
 
 		for i := 0; i < *newNum-1; i++ {
-			newNodes[i].siblingPtr = (*Node)(unsafe.Pointer(newNodes[i+1]))
+			newNodes[i].siblingPtr = &newNodes[i+1].Node
 			newNodes[i].BatchInsertWithMigrationAndMoveMent(
 				migrate, &migrateIdx, migrateNum, keys, values, &idx, num,
 				batchSize, buf, &moveIdx, moveNum,
@@ -699,11 +699,11 @@ func (inode *INode) BatchInsert(
 
 	// Adjust sibling pointers
 	oldSibling := inode.siblingPtr
-	inode.siblingPtr = (*Node)(unsafe.Pointer(newNodes[0]))
+	inode.siblingPtr = &newNodes[0].Node
 
 	// Insert data into sibling nodes
 	for i := 0; i < *newNum-1; i++ {
-		newNodes[i].siblingPtr = (*Node)(unsafe.Pointer(newNodes[i+1]))
+		newNodes[i].siblingPtr = &newNodes[i+1].Node
 		newNodes[i].BatchInsertWithMovement(
 			keys, values, &idx, num, batchSize, buf, &moveIdx, moveNum,
 		)

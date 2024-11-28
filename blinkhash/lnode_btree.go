@@ -112,8 +112,16 @@ func (b *LNodeBTree) InsertAfterSplit(key, value interface{}) {
 }
 
 func (b *LNodeBTree) Split(splitKey interface{}, key interface{}, value interface{}, version interface{}) *Node {
-	//TODO implement me
-	panic("implement me")
+	half := len(b.Entries) / 2
+	//splitKey := b.Entries[half-1].Key // 确定拆分键
+	// 创建新的兄弟节点
+	newLeaf := NewLNodeBTreeWithSibling(b.LNode.siblingPtr, b.LNode.count, b.LNode.level)
+	newLeaf.LNode.HighKey = b.LNode.HighKey
+	copy(newLeaf.Entries, b.Entries[half:]) // 拷贝后半部分到新节点
+	b.LNode.siblingPtr = &newLeaf.LNode.Node
+	b.LNode.HighKey = splitKey
+	b.LNode.count = half
+	return nil
 }
 
 func (b *LNodeBTree) Update(key interface{}, value interface{}, version uint64) int {
@@ -148,6 +156,7 @@ func (b *LNodeBTree) Print() {
 
 func (b *LNodeBTree) SanityCheck(key interface{}, first bool) {
 	//TODO implement me
+	fmt.Println("LNodeBTree 打印 SanityCheck")
 	panic("implement me")
 }
 

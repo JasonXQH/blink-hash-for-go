@@ -248,3 +248,25 @@ func TestINode_BatchInsertLastLevel(t *testing.T) {
 		}
 	}
 }
+
+// TestINodeSanityCheck 创建一些 INode 实例并调用 SanityCheck，观察输出
+func TestINodeSanityCheck(t *testing.T) {
+	// 创建具有确定关系的 INode 实例
+	rightNode := NewINode(1, 100, nil, nil)
+	middleNode := NewINode(1, 60, &rightNode.Node, nil)
+	leftNode := NewINode(1, 30, &middleNode.Node, nil)
+	middleNode.leftmostPtr = &leftNode.Node
+	rightNode.leftmostPtr = &middleNode.Node
+	// 添加条目
+	leftNode.Entries = []Entry{{Key: 10, Value: 10}, {Key: 20, Value: 20}}
+	leftNode.count = len(leftNode.Entries)
+
+	middleNode.Entries = []Entry{{Key: 40, Value: 40}, {Key: 35, Value: 35}} // 故意设置错误的键顺序
+	middleNode.count = len(middleNode.Entries)
+
+	rightNode.Entries = []Entry{{Key: 70, Value: 70}, {Key: 90, Value: 90}}
+	rightNode.count = len(rightNode.Entries)
+
+	// 调用 SanityCheck 并查看输出
+	leftNode.SanityCheck(30, false) // 应该输出因为 Key 顺序错误的信息
+}

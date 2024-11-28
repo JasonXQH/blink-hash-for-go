@@ -47,12 +47,14 @@ type LNodeInterface interface {
 //
 // NewLNode 创建一个新的 LNode 实例
 func NewLNode(level int, nodeType NodeType) *LNode {
-	return &LNode{
+	lnode := &LNode{
 		Node: Node{
 			level: level,
 		},
 		Type: nodeType,
 	}
+	lnode.Node.Behavior = lnode
+	return lnode
 }
 
 // NewLNodeWithSibling
@@ -66,7 +68,7 @@ func NewLNode(level int, nodeType NodeType) *LNode {
 //
 // NewLNode 创建 LNode
 func NewLNodeWithSibling(nodeType NodeType, sibling *Node, count, level int) *LNode {
-	return &LNode{
+	lnode := &LNode{
 		Node: Node{
 			siblingPtr: sibling,
 			count:      count,
@@ -74,6 +76,8 @@ func NewLNodeWithSibling(nodeType NodeType, sibling *Node, count, level int) *LN
 		},
 		Type: nodeType,
 	}
+	lnode.Node.Behavior = lnode
+	return lnode
 }
 
 // WriteUnlock
@@ -218,7 +222,7 @@ func (n *LNode) Print() {
 //	@param first
 func (n *LNode) SanityCheck(key interface{}, first bool) {
 	if n.Behavior != nil {
-		n.Behavior.Print()
+		n.Behavior.SanityCheck(key, first)
 	}
 	fmt.Printf("Print: node type error: %v\n", n.Type)
 }
