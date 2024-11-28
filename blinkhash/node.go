@@ -16,6 +16,7 @@ type Node struct {
 }
 type NodeInterface interface {
 	SanityCheck(prevHighKey interface{}, first bool)
+	getLNodeType() NodeType
 }
 
 // NewNode 创建并初始化 Node 结构体实例

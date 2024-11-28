@@ -111,9 +111,9 @@ func (b *LNodeBTree) InsertAfterSplit(key, value interface{}) {
 	b.LNode.count++
 }
 
-func (b *LNodeBTree) Split(splitKey interface{}, key interface{}, value interface{}, version interface{}) *Node {
+func (b *LNodeBTree) Split(splitKey interface{}, key interface{}, value interface{}, version interface{}) *LNodeBTree {
 	half := len(b.Entries) / 2
-	//splitKey := b.Entries[half-1].Key // 确定拆分键
+	splitKey := b.Entries[half-1].Key // 确定拆分键
 	// 创建新的兄弟节点
 	newLeaf := NewLNodeBTreeWithSibling(b.LNode.siblingPtr, b.LNode.count, b.LNode.level)
 	newLeaf.LNode.HighKey = b.LNode.HighKey
@@ -121,7 +121,18 @@ func (b *LNodeBTree) Split(splitKey interface{}, key interface{}, value interfac
 	b.LNode.siblingPtr = &newLeaf.LNode.Node
 	b.LNode.HighKey = splitKey
 	b.LNode.count = half
-	return nil
+	// 根据键值确定插入位置
+	if compareIntKeys(splitKey, key) < 0 {
+		newLeaf.InsertAfterSplit(key, value)
+	} else {
+		b.InsertAfterSplit(key, value)
+	}
+	siblingPtr := newLeaf.LNode.siblingPtr
+	if siblingPtr != nil && siblingPtr.Behavior.getLNodeType() == HashNode {
+		siblingPtr.set = newLeaf
+	}
+
+	return newLeaf
 }
 
 func (b *LNodeBTree) Update(key interface{}, value interface{}, version uint64) int {

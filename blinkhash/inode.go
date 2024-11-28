@@ -19,6 +19,11 @@ type INode struct {
 	Entries     []Entry     // 条目切片
 }
 
+func (in *INode) getType() NodeType {
+	//TODO implement me
+	return -1
+}
+
 // NewINode 创建并初始化一个 INode 实例，适用于各种构造场景
 func NewINode(level int, highKey interface{}, sibling, left *Node) *INode {
 	cardinality := int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
@@ -509,10 +514,9 @@ func (inode *INode) SanityCheck(prevHighKey interface{}, first bool) {
 		}
 	}
 	// 如果有 sibling 节点，递归检查下一个节点
-	// siblingPtr 类型强制转换
 	if inode.siblingPtr != nil {
-		siblingINode := inode.Node.siblingPtr
-		siblingINode.Behavior.SanityCheck(inode.HighKey, false)
+		siblingPtr := inode.siblingPtr
+		siblingPtr.Behavior.SanityCheck(inode.HighKey, false)
 	}
 }
 

@@ -261,7 +261,7 @@ func TestINodeSanityCheck(t *testing.T) {
 	leftNode.Entries = []Entry{{Key: 10, Value: 10}, {Key: 20, Value: 20}}
 	leftNode.count = len(leftNode.Entries)
 
-	middleNode.Entries = []Entry{{Key: 40, Value: 40}, {Key: 35, Value: 35}} // 故意设置错误的键顺序
+	middleNode.Entries = []Entry{{Key: 35, Value: 35}, {Key: 40, Value: 40}} // 故意设置错误的键顺序
 	middleNode.count = len(middleNode.Entries)
 
 	rightNode.Entries = []Entry{{Key: 70, Value: 70}, {Key: 90, Value: 90}}

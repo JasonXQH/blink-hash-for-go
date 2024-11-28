@@ -8,7 +8,8 @@ import (
 type LNodeHash struct {
 	Cardinality int
 	LNode
-	Buckets []Bucket
+	Buckets        []Bucket
+	LeftSiblingPtr *LNodeHash
 }
 
 func NewLNodeHash() *LNodeHash {

@@ -20,6 +20,10 @@ type LNode struct {
 	Behavior LNodeInterface // 添加接口引用以实现多态
 }
 
+func (n *LNode) getLNodeType() NodeType {
+	return n.Type
+}
+
 // LNodeInterface
 //
 //	@Description:
