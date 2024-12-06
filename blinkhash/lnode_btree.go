@@ -67,11 +67,11 @@ func NewLNodeBTreeWithSibling(sibling NodeInterface, count, level int) *LNodeBTr
 	}
 }
 
-// TODO 实现Node Interface接口：
 func (b *LNodeBTree) GetType() NodeType {
 	return BTreeNode
 }
 
+// TODO 实现Node Interface接口：
 func (b *LNodeBTree) GetCount() int {
 	return b.count
 }
@@ -97,6 +97,12 @@ func (b *LNodeBTree) Print() {
 	}
 }
 
+// SanityCheck
+//
+//	@Description: 实现Node基类接口，检查合法性
+//	@receiver b
+//	@param _highKey
+//	@param first
 func (b *LNodeBTree) SanityCheck(_highKey interface{}, first bool) {
 	fmt.Printf("我是LNodeBTree 调用 SanityCheck:\n")
 	// 检查键值是否有序
@@ -150,8 +156,31 @@ func (b *LNodeBTree) SanityCheck(_highKey interface{}, first bool) {
 	}
 }
 
-//TODO 实现Splittable接口：
+// WriteUnlock
+//
+//	@Description: 实现基类中的WriteUnlock方法，还是调用Node实现的上锁接口
+//	@receiver b
+func (b *LNodeBTree) WriteUnlock() {
+	b.Node.WriteUnlock()
+}
 
+// WriteUnlockObsolete
+//
+//	@Description: 实现基类中的WriteUnlockObsolete方法
+//	@receiver b
+func (b *LNodeBTree) WriteUnlockObsolete() {
+	b.Node.WriteUnlockObsolete()
+}
+
+// Split
+//
+//	@Description: 实现Splittable接口，分裂节点
+//	@receiver b
+//	@param key
+//	@param value
+//	@param version
+//	@return Splittable
+//	@return interface{}
 func (b *LNodeBTree) Split(key interface{}, value interface{}, version uint64) (Splittable, interface{}) {
 	half := len(b.Entries) / 2
 	if half == 0 {
@@ -164,7 +193,7 @@ func (b *LNodeBTree) Split(key interface{}, value interface{}, version uint64) (
 	newLeaf.HighKey = b.HighKey
 
 	// 拷贝后半部分到新叶节点
-	newLeaf.Entries = append(newLeaf.Entries, b.Entries[half:]...)
+	copy(newLeaf.Entries, b.Entries[half:half+newCnt])
 	newLeaf.count = newCnt
 
 	// 更新当前节点
@@ -200,21 +229,28 @@ func (b *LNodeBTree) InsertAfterSplit(key, value interface{}) {
 	b.count++
 }
 
+// Insert
+//
+//	@Description: 实现Insertable接口：
+//	@receiver b
+//	@param key
+//	@param value
+//	@param version
+//	@return int
 func (b *LNodeBTree) Insert(key interface{}, value interface{}, version uint64) int {
-	fmt.Println("我是LNodeBTree，调用Insert")
 	success, needRestart := b.TryUpgradeWriteLock(version)
 	if needRestart {
 		// 如果需要重启，按照 C++ 代码的逻辑返回 -1
-		return NEED_RESTART
+		return NeedRestart
 	}
 	if !success {
 		// 如果未能升级写锁成功，也需要处理
-		return NEED_RESTART
+		return NeedRestart
 	}
 	// 检查是否有足够空间进行插入
 	if len(b.Entries) >= b.Cardinality {
-		b.WriteUnlock()   // 释放写锁
-		return NEED_SPLIT // 表示需要分裂
+		b.WriteUnlock()  // 释放写锁
+		return NeedSplit // 表示需要分裂
 	}
 	// 执行插入逻辑
 	pos := b.FindLowerBound(key)
@@ -233,46 +269,129 @@ func (b *LNodeBTree) Insert(key interface{}, value interface{}, version uint64) 
 	// 更新计数
 	b.count++
 	b.WriteUnlock() // 插入完成后释放写锁
-	return INSERT_SUCCESS
+	return InsertSuccess
 }
 
-func (b *LNodeBTree) WriteUnlock() {
-	// 实现具体方法
-	b.Node.WriteUnlock()
-}
-
-// 实现其他 LNodeInterface 方法...
-func (b *LNodeBTree) Utilization() float64 {
-	// 返回B树节点的利用率计算
-	return float64(len(b.Entries)) / float64(b.Cardinality)
-}
-
-func (b *LNodeBTree) ConvertUnlock() {
-	b.WriteUnlock()
-}
-
-func (b *LNodeBTree) WriteUnlockObsolete() {
-	//TODO implement me
-	panic("implement me")
-}
-
-// InsertAfterSplit
+// Update
 //
-//	@Description:
+//	@Description: 实现Updatable接口定义的更新方法
 //	@receiver b
 //	@param key
 //	@param value
-
+//	@param version
+//	@return int
 func (b *LNodeBTree) Update(key interface{}, value interface{}, version uint64) int {
-	//TODO implement me
-	panic("implement me")
+	needRestart, _ := b.Node.TryUpgradeWriteLock(version)
+	if needRestart {
+		return NeedRestart
+	}
+
+	// Perform update_linear
+	updated := b.updateLinear(key, value)
+
+	b.WriteUnlock()
+
+	if updated {
+		return UpdateSuccess
+	} else {
+		return UpdateFailure
+	}
 }
 
+// updateLinear searches for the key and updates the value if found
+func (b *LNodeBTree) updateLinear(key interface{}, value interface{}) bool {
+	for i, entry := range b.Entries {
+		if compareIntKeys(entry.Key, key) == 0 {
+			b.Entries[i].Value = value
+			return true
+		}
+	}
+	return false
+}
+
+// Remove
+//
+//	@Description: 实现Removable接口定义的方法
+//	@receiver b
+//	@param key
+//	@param version
+//	@return int
 func (b *LNodeBTree) Remove(key interface{}, version uint64) int {
-	//TODO implement me
-	panic("implement me")
+	needRestart, _ := b.TryUpgradeWriteLock(version)
+	if needRestart {
+		return NeedRestart
+	}
+
+	if b.count > 0 {
+		pos := b.findPosLinear(key)
+		if pos == -1 {
+			b.WriteUnlock()
+			return KeyNotFound // Key not found
+		}
+		// Remove the entry at pos by shifting
+		b.Entries = append(b.Entries[:pos], b.Entries[pos+1:]...)
+		b.count--
+
+		b.WriteUnlock()
+		return RemoveSuccess
+	}
+
+	b.WriteUnlock()
+	return KeyNotFound
 }
 
+// findPosLinear finds the position of the key in Entries
+func (b *LNodeBTree) findPosLinear(key interface{}) int {
+	for i, entry := range b.Entries {
+		if compareIntKeys(entry.Key, key) == 0 {
+			return i
+		}
+	}
+	return -1 // Not found
+}
+
+// RangeLookUp
+//
+//	@Description: 实现RangeLookUper接口定义的方法，范围查找
+//	@receiver b
+//	@param key
+//	@param buf
+//	@param count
+//	@param searchRange
+//	@param continued
+//	@return int
+func (b *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int, searchRange int, continued bool) int {
+	currentCount := count // 使用一个单独的变量跟踪填充数量
+	if continued {
+		for i := 0; i < b.count; i++ {
+			*buf = append(*buf, b.Entries[i].Value)
+			currentCount++
+			if currentCount == searchRange {
+				return currentCount
+			}
+		}
+		return currentCount
+	} else {
+		pos := b.FindLowerBound(key)
+		// 从 pos 开始，注意 pos + 1 是否合理，取决于具体需求
+		for i := pos + 1; i < b.count; i++ {
+			*buf = append(*buf, b.Entries[i].Value)
+			currentCount++
+			if currentCount == searchRange {
+				return currentCount
+			}
+		}
+		return currentCount
+	}
+}
+
+// Find
+//
+//	@Description: 实现Finder接口定义查找方法
+//	@receiver b
+//	@param key
+//	@return interface{}
+//	@return bool
 func (b *LNodeBTree) Find(key interface{}) (interface{}, bool) {
 	//TODO implement me
 	// 假设 LEAF_BTREE_SIZE 是一个全局常量
@@ -283,11 +402,22 @@ func (b *LNodeBTree) Find(key interface{}) (interface{}, bool) {
 	}
 }
 
-func (b *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int, searchRange int, continued bool) int {
-	//TODO implement me
-	panic("implement me")
+// Utilization
+//
+//	@Description: 实现Utilizer接口
+//	@receiver b
+//	@return float64
+func (b *LNodeBTree) Utilization() float64 {
+	// 返回B树节点的利用率计算
+	return float64(len(b.Entries)) / float64(b.Cardinality)
 }
 
+// lowerboundLinear
+//
+//	@Description: 工具函数，线性查找
+//	@receiver b
+//	@param key
+//	@return int
 func (b *LNodeBTree) lowerboundLinear(key interface{}) int {
 	keyInt, ok := key.(int)
 	if !ok {
@@ -305,6 +435,12 @@ func (b *LNodeBTree) lowerboundLinear(key interface{}) int {
 	return len(b.Entries) // 插入到末尾
 }
 
+// lowerboundBinary
+//
+//	@Description: 工具函数，二分查找key
+//	@receiver b
+//	@param key
+//	@return int
 func (b *LNodeBTree) lowerboundBinary(key interface{}) int {
 	lower := 0
 	upper := len(b.Entries)
@@ -321,9 +457,12 @@ func (b *LNodeBTree) lowerboundBinary(key interface{}) int {
 	return lower
 }
 
-/**
-*  工具函数
- */
+// FindLowerBound
+//
+//	@Description: 工具函数，查找下界
+//	@receiver b
+//	@param key
+//	@return int
 func (b *LNodeBTree) FindLowerBound(key interface{}) int {
 	if LeafBTreeSize < 2048 {
 		return b.lowerboundLinear(key)
@@ -357,15 +496,26 @@ func (b *LNodeBTree) findBinary(key interface{}) (interface{}, bool) {
 	return nil, false // 代替 C++ 中的返回 0
 }
 
-// compareKeys 比较两个键，需要根据键的实际类型进行具体实现
-func compareIntKeys(key1, key2 interface{}) int {
-	// 示例实现，假设键类型为 int
-	k1 := key1.(int)
-	k2 := key2.(int)
-	if k1 < k2 {
-		return -1
-	} else if k1 > k2 {
-		return 1
+// batchInsert
+//
+//	@Description: 批量插入
+//	@receiver b
+//	@param buf
+//	@param batchSize
+//	@param from
+//	@param to
+func (b *LNodeBTree) batchInsert(buf []Entry, batchSize int, from *int, to int) {
+	// 如果 from + batch_size < to，则拷贝 batch_size 个条目
+	if *from+batchSize < to {
+		b.Entries = append(b.Entries, buf[*from:*from+batchSize]...)
+		*from += batchSize
+		b.count += batchSize
+	} else {
+		// 否则只拷贝 (to - from) 个条目
+		b.Entries = append(b.Entries, buf[*from:to]...)
+		b.count += (to - *from)
+		*from = to
 	}
-	return 0
+	// 更新 HighKey
+	b.HighKey = b.Entries[b.count-1].Key
 }

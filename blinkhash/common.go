@@ -8,15 +8,19 @@ const (
 )
 
 const (
-	NEED_RESTART   = -1 // 需要重启
-	INSERT_SUCCESS = 0  // 插入成功
-	NEED_SPLIT     = 1  // 需要分割
+	NeedRestart   = -1 // 需要重启
+	InsertSuccess = 0  // 插入成功
+	NeedSplit     = 1  // 需要分割
+	KeyNotFound   = 1
+	RemoveSuccess = 0
+	UpdateSuccess = 0
+	UpdateFailure = 1
 )
 
 var statusNames = map[int]string{
-	NEED_RESTART:   "NEED_RESTART",
-	INSERT_SUCCESS: "INSERT_SUCCESS",
-	NEED_SPLIT:     "NEED_SPLIT",
+	NeedRestart:   "NEED_RESTART",
+	InsertSuccess: "INSERT_SUCCESS",
+	NeedSplit:     "NEED_SPLIT",
 }
 
 const (
@@ -51,4 +55,22 @@ const (
 	LeafHashSize  = 1024 * 256
 	HashFuncsNum  = 2
 	NumSlot       = 4
+)
+
+// compareKeys 比较两个键，需要根据键的实际类型进行具体实现
+func compareIntKeys(key1, key2 interface{}) int {
+	// 示例实现，假设键类型为 int
+	k1 := key1.(int)
+	k2 := key2.(int)
+	if k1 < k2 {
+		return -1
+	} else if k1 > k2 {
+		return 1
+	}
+	return 0
+}
+
+const (
+	LINKED      = false // 启用链接机制
+	FINGERPRINT = false // 启用指纹机制
 )

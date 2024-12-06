@@ -8,9 +8,9 @@ import (
 type State int
 
 const (
-	Stable State = iota
-	LinkedLeft
-	LinkedRight
+	STABLE State = iota
+	LINKED_LEFT
+	LINKED_RIGHT
 )
 
 type Bucket struct {
@@ -29,7 +29,7 @@ func NewBucket(entryNum int) *Bucket {
 
 func (b *Bucket) TryLock() bool {
 	version := atomic.LoadUint32(&b.lock)
-	if version&0b10 == 0b10 { // is locked
+	if b.isLocked(version) {
 		return false
 	}
 	return atomic.CompareAndSwapUint32(&b.lock, version, version+0b10)
@@ -42,6 +42,18 @@ func (b *Bucket) Unlock() {
 func (b *Bucket) Insert(key, value interface{}) bool {
 	for i := range b.entries {
 		if b.entries[i].Key == nil { // assuming nil as empty
+			b.entries[i].Key = key
+			b.entries[i].Value = value
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Bucket) InsertWithFingerprint(key, value interface{}, fingerprint uint8, empty interface{}) bool {
+	for i := range b.entries {
+		if b.entries[i].Key == nil { // 假设 nil 代表空
+			b.fingerprints[i] = fingerprint
 			b.entries[i].Key = key
 			b.entries[i].Value = value
 			return true
@@ -107,7 +119,7 @@ func (b *Bucket) CollectAll(buf *[]Entry) {
 // Update updates the value for a given key if it exists in the bucket.
 func (b *Bucket) Update(key, value interface{}) bool {
 	for i := range b.entries {
-		if b.entries[i].Key == key {
+		if compareIntKeys(b.entries[i].Key, key) == 0 {
 			b.entries[i].Value = value
 			return true
 		}
@@ -115,11 +127,11 @@ func (b *Bucket) Update(key, value interface{}) bool {
 	return false
 }
 
-// Remove removes an entry with the specified key from the bucket.
+// Remove 从桶中移除指定键的条目
 func (b *Bucket) Remove(key interface{}) bool {
 	for i := range b.entries {
-		if b.entries[i].Key == key {
-			b.entries[i].Key = nil // Assuming nil represents EMPTY<Key_t>
+		if compareIntKeys(b.entries[i].Key, key) == 0 {
+			b.entries[i].Key = nil // 假设 nil 表示空
 			return true
 		}
 	}

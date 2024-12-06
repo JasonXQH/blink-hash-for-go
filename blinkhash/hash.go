@@ -2,8 +2,8 @@ package blinkhash
 
 import (
 	"encoding/binary"
+	"github.com/cespare/xxhash/v2"
 	"hash/fnv"
-	"unsafe"
 )
 
 // HashFunction type for making an array of hash functions
@@ -61,56 +61,52 @@ func Murmur2(data []byte, seed uint64) uint64 {
 	return uint64(h)
 }
 
-func Xxhash(data []byte, seed uint64) uint64 {
-	if uintptr(unsafe.Pointer(&data[0]))&7 == 0 {
-		return hashCompute(data, uint64(len(data)), seed)
-	}
-	return hashCompute(data, uint64(len(data)), seed)
+// Xxhash in Go using the third-party library
+func XxhashFunc(data []byte, seed uint64) uint64 {
+	return xxhash.Sum64(data)
 }
 
+// Standard (FNV) hash function in Go
 func Standard(data []byte, seed uint64) uint64 {
 	h := fnv.New64a()
 	h.Write(data)
 	return h.Sum64() ^ seed
 }
 
-func hashRead64Align(p unsafe.Pointer, align uint32) uint64 {
-	if align == 0 {
-		return *(*uint64)(p)
-	}
-	return binary.LittleEndian.Uint64((*[8]byte)(p)[:])
-}
-
-func hashRead32Align(p unsafe.Pointer, align uint32) uint32 {
-	if align == 0 {
-		return *(*uint32)(p)
-	}
-	return binary.LittleEndian.Uint32((*[4]byte)(p)[:])
-}
-
+// hashCompute 是一个示例函数，你可以根据需要实现更复杂的逻辑
 func hashCompute(data []byte, length, seed uint64) uint64 {
-	var hash uint64
-
-	// 示例实现，实际的转换可能需要根据函数逻辑精确调整
-	for i := 0; i+8 <= len(data); i += 8 {
-		val := binary.LittleEndian.Uint64(data[i : i+8])
-		hash ^= val
+	// 示例实现，实际需要根据 C++ 版本的 hash_compute 逻辑调整
+	hash := seed
+	for i := 0; i < len(data); i++ {
+		hash ^= uint64(data[i])
 		hash = (hash << 31) | (hash >> (64 - 31))
-		hash *= Number64_1
+		hash *= 11400714785074694791 // NUMBER64_1
 	}
-
 	return hash
 }
 
+// 定义 Hash 函数数组
 var hashFunctions = []HashFunction{
-	Standard, // This should be replaced by an actual implementation
-	Murmur2,
-	Jenkins,
-	Xxhash, // Assume xxhash has been implemented
+	Standard,   // 0
+	Murmur2,    // 1
+	Jenkins,    // 2
+	XxhashFunc, // 3
 }
 
 // General hash function selector
-func h(data []byte, funcNum int, seed uint64) uint64 {
+func h(key interface{}, funcNum int, seed uint64) uint64 {
+	var data []byte
+	switch k := key.(type) {
+	case int:
+		data = make([]byte, 8)
+		binary.LittleEndian.PutUint64(data, uint64(k))
+	case string:
+		data = []byte(k)
+	// Add other key types as needed
+	default:
+		// Handle other types or panic
+		panic("Unsupported key type for hashing")
+	}
 	if funcNum >= 0 && funcNum < len(hashFunctions) {
 		return hashFunctions[funcNum](data, seed)
 	}

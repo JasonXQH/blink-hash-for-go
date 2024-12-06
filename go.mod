@@ -2,7 +2,10 @@ module 2024-11-timeseries-go
 
 go 1.19
 
-require github.com/stretchr/testify v1.9.0
+require (
+	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/stretchr/testify v1.9.0
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
