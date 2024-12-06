@@ -5,11 +5,6 @@ import (
 	"unsafe"
 )
 
-// 假设 PageSize, KeyType 是已定义的常量或类型。
-const PageSize = 512 // 示例页大小，具体值应根据实际情况调整
-const FILL_FACTOR = 0.8
-const BITS_PER_LONG = 64
-
 // INode 结构在 Go 中模仿 inode_t 的功能。
 // 由于go中不存在泛型，需要指出的是entry中的value值必须是node类型的
 type INode struct {
@@ -20,12 +15,11 @@ type INode struct {
 }
 
 func (in *INode) getType() NodeType {
-	//TODO implement me
-	return -1
+	return INNERNode
 }
 
 // NewINode 创建并初始化一个 INode 实例，适用于各种构造场景
-func NewINode(level int, highKey interface{}, sibling, left *Node) *INode {
+func NewINode(level int, highKey interface{}, sibling, left NodeInterface) *INode {
 	cardinality := int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
 	inode := &INode{
 		Node: Node{
@@ -37,7 +31,6 @@ func NewINode(level int, highKey interface{}, sibling, left *Node) *INode {
 		HighKey:     highKey,
 		Entries:     make([]Entry, cardinality),
 	}
-	inode.Node.Behavior = inode
 	return inode
 }
 
@@ -54,7 +47,7 @@ func NewINodeForInsertInBatch(level int) *INode {
 }
 
 // NewINodeForHeightGrowth 用于树高度增加时的构造函数
-func NewINodeForHeightGrowth(splitKey interface{}, left, right, sibling *Node, level int, highKey interface{}) *INode {
+func NewINodeForHeightGrowth(splitKey interface{}, left, right, sibling NodeInterface, level int, highKey interface{}) *INode {
 	inode := &INode{
 		Node: Node{
 			level:       level,
@@ -74,7 +67,7 @@ func NewINodeForHeightGrowth(splitKey interface{}, left, right, sibling *Node, l
 }
 
 // NewINodeForSplit 用于节点分裂时的构造函数
-func NewINodeForSplit(sibling *Node, count int, left *Node, level int, highKey interface{}) *INode {
+func NewINodeForSplit(sibling NodeInterface, count int, left NodeInterface, level int, highKey interface{}) *INode {
 	return &INode{
 		Node: Node{
 			siblingPtr:  sibling,
@@ -105,15 +98,27 @@ func (i *INode) findLowerBound(key interface{}) int {
 
 // ScanNode 根据提供的键扫描并返回对应的节点
 func (in *INode) ScanNode(key interface{}) *Node {
-	if in.siblingPtr != nil && in.HighKey.(int) < key.(int) {
-		return in.siblingPtr
-	} else {
-		idx := in.findLowerBound(key)
-		if idx > -1 && idx < len(in.Entries) {
-			return in.Entries[idx].Value.(*Node)
+	if in.siblingPtr != nil {
+		// 假设 HighKey 是 int 类型，确保 key 也是 int 类型
+		keyInt, ok := key.(int)
+		if !ok {
+			return nil // 或其他错误处理
 		}
-		return in.leftmostPtr
+		highKeyInt, ok := in.HighKey.(int)
+		if !ok {
+			return nil // 或其他错误处理
+		}
+
+		if highKeyInt < keyInt {
+			// 使用类型断言来检查 siblingPtr 是否实际上是 *Node 类型
+			if node, ok := in.siblingPtr.(*Node); ok {
+				return node
+			}
+			return nil // 或其他错误处理
+		}
 	}
+	//TODO实现继续
+	return nil
 }
 
 // Insert 插入新的键值对到节点中，保持键的排序
@@ -325,7 +330,7 @@ func (inode *INode) BatchInsertLastLevelWithMovement(
 func (inode *INode) BatchInsertLastLevel(keys []interface{}, values []*Node, num int, newNum *int,
 ) ([]*INode, error) {
 	pos := inode.findLowerBound(keys[0])
-	batchSize := int(float64(inode.Cardinality) * FILL_FACTOR)
+	batchSize := int(float64(inode.Cardinality) * FillFactor)
 	inplace := (inode.count + num) < inode.Cardinality
 	moveNum := 0
 	idx := 0
@@ -516,7 +521,7 @@ func (inode *INode) SanityCheck(prevHighKey interface{}, first bool) {
 	// 如果有 sibling 节点，递归检查下一个节点
 	if inode.siblingPtr != nil {
 		siblingPtr := inode.siblingPtr
-		siblingPtr.Behavior.SanityCheck(inode.HighKey, false)
+		siblingPtr.SanityCheck(inode.HighKey, false)
 	}
 }
 
@@ -595,7 +600,7 @@ func (inode *INode) BatchInsert(
 	keys []interface{}, values []*Node, num int, newNum *int,
 ) []*INode {
 	pos := inode.findLowerBound(keys[0])
-	batchSize := int(float64(inode.Cardinality) * FILL_FACTOR)
+	batchSize := int(float64(inode.Cardinality) * FillFactor)
 	inPlace := (inode.count + num) < inode.Cardinality
 	moveNum := 0
 	idx := 0

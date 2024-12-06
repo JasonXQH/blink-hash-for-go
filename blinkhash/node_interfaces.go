@@ -1,0 +1,49 @@
+package blinkhash
+
+type NodeType int
+
+type NodeInterface interface {
+	GetCount() int
+	GetLevel() int
+	GetLock() uint64
+	Print()
+	WriteUnlock()
+	WriteUnlockObsolete()
+	SanityCheck(prevHighKey interface{}, first bool)
+	//GetType() NodeType
+}
+
+// Insertable 接口定义插入方法
+type Insertable interface {
+	Insert(key interface{}, value interface{}, version uint64) int
+}
+
+// Splittable 接口定义分裂方法
+type Splittable interface {
+	Split(key interface{}, value interface{}, version uint64) (Splittable, interface{})
+}
+
+// Updatable 接口定义更新方法
+type Updatable interface {
+	Update(key interface{}, value interface{}, version uint64) int
+}
+
+// Removable 接口定义移除方法
+type Removable interface {
+	Remove(key interface{}, version uint64) int
+}
+
+// Finder 接口定义查找方法
+type Finder interface {
+	Find(key interface{}) (interface{}, bool)
+}
+
+// RangeLookuper 接口定义范围查找方法
+type RangeLookuper interface {
+	RangeLookUp(key interface{}, buf *[]interface{}, count int, searchRange int, continued bool) int
+}
+
+// Utilizer 接口定义利用率方法
+type Utilizer interface {
+	Utilization() float64
+}

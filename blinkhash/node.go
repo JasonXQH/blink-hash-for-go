@@ -1,6 +1,7 @@
 package blinkhash
 
 import (
+	"fmt"
 	"runtime"
 	"sync/atomic"
 )
@@ -8,15 +9,53 @@ import (
 // Node 定义了 node_t 的 Go 版本
 type Node struct {
 	lock        uint64
-	siblingPtr  *Node
-	leftmostPtr *Node
+	siblingPtr  NodeInterface
+	leftmostPtr NodeInterface
 	count       int
 	level       int
-	Behavior    NodeInterface // 添加接口引用以实现多态
 }
-type NodeInterface interface {
-	SanityCheck(prevHighKey interface{}, first bool)
-	getLNodeType() NodeType
+
+func (n *Node) GetType() NodeType {
+	return BASENode
+}
+
+func (n *Node) GetCount() int {
+	return n.count
+}
+
+func (n *Node) GetLevel() int {
+	return n.level
+}
+
+func (n *Node) GetLock() uint64 {
+	return n.lock
+}
+
+// Print 函数打印 Node 信息
+func (n *Node) Print() {
+	// 打印 Node 的基本信息
+	fmt.Printf("Node Information:\n")
+	fmt.Printf("Lock: %d\n", n.lock)
+	fmt.Printf("Count: %d\n", n.count)
+	fmt.Printf("Level: %d\n", n.level)
+
+	// 打印 siblingPtr 和 leftmostPtr 信息（假设它们是 NodeInterface 类型）
+	if n.siblingPtr != nil {
+		fmt.Println("Sibling Pointer: (non-nil)")
+	} else {
+		fmt.Println("Sibling Pointer: nil")
+	}
+
+	if n.leftmostPtr != nil {
+		fmt.Println("Leftmost Pointer: (non-nil)")
+	} else {
+		fmt.Println("Leftmost Pointer: nil")
+	}
+}
+
+func (n *Node) SanityCheck(prevHighKey interface{}, first bool) {
+	//打印SanityCheck信息
+	fmt.Println("Node执行SanityCheck")
 }
 
 // NewNode 创建并初始化 Node 结构体实例
@@ -27,7 +66,7 @@ func NewNode(level int) *Node {
 }
 
 // NewNodeWithSiblings 创建一个新的 Node 实例并初始化相关的指针和计数器
-func NewNodeWithSiblings(sibling, left *Node, count, level int) *Node {
+func NewNodeWithSiblings(sibling, left NodeInterface, count, level int) *Node {
 	return &Node{
 		siblingPtr:  sibling,
 		leftmostPtr: left,
@@ -37,7 +76,7 @@ func NewNodeWithSiblings(sibling, left *Node, count, level int) *Node {
 }
 
 // UpdateMeta 更新 Node 的元数据
-func (n *Node) UpdateMeta(siblingPtr *Node, level int) {
+func (n *Node) UpdateMeta(siblingPtr NodeInterface, level int) {
 	atomic.StoreUint64(&n.lock, 0) // 重置锁为未锁定
 	n.siblingPtr = siblingPtr
 	n.leftmostPtr = nil
@@ -86,6 +125,10 @@ func (n *Node) WriteLock() {
 // TryWriteLock 尝试获取写锁，如果成功返回 true
 func (n *Node) TryWriteLock() bool {
 	version := atomic.LoadUint64(&n.lock)
+	if n.IsLocked(version) || n.IsObsolete(version) {
+		runtime.Gosched() // 让出时间片，相当于 _mm_pause()
+		return false
+	}
 	return atomic.CompareAndSwapUint64(&n.lock, version, version+0b10)
 }
 
@@ -95,8 +138,16 @@ func (n *Node) WriteUnlock() {
 }
 
 // WriteUnlockObsolete 将节点标记为过时并释放写锁
+// WriteUnlockObsolete 将节点标记为过时并释放写锁
 func (n *Node) WriteUnlockObsolete() {
-	atomic.AddUint64(&n.lock, 0b11)
+	for {
+		old := atomic.LoadUint64(&n.lock)
+		new := old - 0b11
+		if atomic.CompareAndSwapUint64(&n.lock, old, new) {
+			return
+		}
+		// 如果 CompareAndSwap 失败，重试
+	}
 }
 
 // TryUpgradeWriteLock 尝试升级写锁，如果版本不匹配或不能锁定则设置需要重启标志

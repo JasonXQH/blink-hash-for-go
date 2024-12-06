@@ -240,7 +240,6 @@ func TestINode_BatchInsertLastLevel(t *testing.T) {
 	if inode.count != len(keys) {
 		t.Errorf("Expected count %d, got %d", len(keys), inode.count)
 	}
-
 	// Verify keys and values
 	for i, key := range keys {
 		if inode.Entries[i].Key != key || inode.Entries[i].Value != values[i] {

@@ -6,15 +6,6 @@ import (
 	"unsafe"
 )
 
-const (
-	Number64_1 = 11400714785074694791
-	Number64_2 = 14029467366897019727
-	Number64_3 = 1609587929392839161
-	Number64_4 = 9650029242287828579
-	Number64_5 = 2870177450012600261
-	Seed       = 0xc70f6907
-)
-
 // HashFunction type for making an array of hash functions
 type HashFunction func(data []byte, seed uint64) uint64
 

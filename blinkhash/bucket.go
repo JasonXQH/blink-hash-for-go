@@ -1,6 +1,9 @@
 package blinkhash
 
-import "sync/atomic"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 type State int
 
@@ -161,4 +164,35 @@ func (b *Bucket) Footprint() (meta, structuralDataOccupied, structuralDataUnoccu
 // IsEmptyKey checks if the key is considered empty.
 func IsEmptyKey(key interface{}) bool {
 	return key == nil
+}
+
+func (b *Bucket) Print() {
+	// 打印 Bucket 的基本信息
+	fmt.Printf("\tLock: %d\n", b.lock)
+	fmt.Printf("\tState: %v\n", b.state) // 假设 State 类型可以直接打印，或者需要格式化
+
+	// 打印 fingerprints 切片
+	fmt.Printf("\tFingerprints: ")
+	if len(b.fingerprints) == 0 {
+		fmt.Println("nil")
+	} else {
+		for i, fingerprint := range b.fingerprints {
+			if i > 0 {
+				fmt.Print(", ")
+			}
+			fmt.Printf("%d", fingerprint)
+		}
+		fmt.Println()
+	}
+
+	// 打印 entries 切片
+	fmt.Printf("\tEntries: \n")
+	if len(b.entries) == 0 {
+		fmt.Println("nil")
+	} else {
+		for i, entry := range b.entries {
+			// 假设 Entry 类型有 Key 和 Value 字段
+			fmt.Printf("\tEntry %d: Key = %v, Value = %v\n", i, entry.Key, entry.Value)
+		}
+	}
 }
