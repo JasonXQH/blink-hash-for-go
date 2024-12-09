@@ -1,271 +1,437 @@
 package blinkhash
 
 import (
-	"fmt"
-	"github.com/stretchr/testify/assert"
+	//"fmt"
 	"testing"
 )
 
-func TestINode_Split(t *testing.T) {
-	inode := &INode{
-		Node: Node{
-			level: 1,
-			count: 4,
-		},
-		Entries: []Entry{
-			{Key: 1, Value: &Node{}},
-			{Key: 3, Value: &Node{}},
-			{Key: 5, Value: &Node{}},
-			{Key: 7, Value: &Node{}},
-		},
-	}
-
-	fmt.Println("Before Insert:", inode.Entries)
-	inode.Insert(4, &Node{}, &Node{})
-	fmt.Println("After Insert:", inode.Entries)
-
-	var splitKey interface{}
-	newNode, splitKey := inode.Split()
-	fmt.Println("Split Key:", splitKey)
-	fmt.Println("Current Node:", inode.Entries)
-	fmt.Println("New Node:", newNode.Entries)
+// Mock NodeInterface 和 Node 实现，用于测试
+type MockNode struct {
+	id int
 }
 
-func TestBatchMigrate_UpdatesLeftmostPtrCorrectly(t *testing.T) {
-	// Setup initial INode and Entries
-	initialNode := Node{}
-	entryNode := Node{}
-	entries := []Entry{
-		{Key: 1, Value: entryNode},
-		{Key: 2, Value: Node{}},
-	}
-	// Create an INode instance
-	inode := INode{
-		Node:    initialNode,
-		Entries: make([]Entry, 0),
-	}
-	// Set migrateIdx to 0
-	migrateIdx := 0
-	// Perform BatchMigrate
-	inode.BatchMigrate(entries, &migrateIdx, len(entries))
-	// Assert that leftmostPtr is updated correctly
-	assert.Equal(t, entryNode, inode.leftmostPtr, "leftmostPtr should be updated to the first entry's value")
+func (m *MockNode) TryWriteLock() bool {
+	return true
 }
 
-func TestINode_BatchKvPair(t *testing.T) {
-	// 示例键值对
-	keys := []interface{}{"key1", "key2", "key3", "key4"}
-	values := []*Node{&Node{}, &Node{}, &Node{}, &Node{}}
-	idx := 0
-	num := len(keys)
-	batchSize := 2
-
-	// 创建一个 INode
-	inode := NewINode(1, nil, nil, nil)
-
-	// 批量填充键值对
-	for {
-		shouldSplit := inode.BatchKvPair(keys, values, &idx, num, batchSize)
-		fmt.Printf("INode after batch: %+v\n", inode)
-
-		if shouldSplit {
-			fmt.Println("Reached batch size, splitting...")
-			// 假设新节点处理逻辑
-			inode = NewINode(1, nil, nil, nil)
-		}
-
-		if idx >= num {
-			break
-		}
-	}
+func (m *MockNode) WriteUnlock() {
+	// Mock implementation
 }
 
-func TestBatchInsertLastLevelWithBuffer(t *testing.T) {
-	// 创建一个 INode
-	inode := &INode{
-		Node: Node{
-			level:       1,
-			count:       0,
-			leftmostPtr: nil,
-		},
-		Entries: make([]Entry, 0),
-	}
-
-	// 示例数据
-	migrate := []Entry{
-		{Key: 1, Value: &Node{}},
-		{Key: 2, Value: &Node{}},
-	}
-	migrateIdx := 0
-	migrateNum := len(migrate)
-
-	keys := []interface{}{3, 4, 5}
-	values := []*Node{&Node{}, &Node{}, &Node{}}
-	idx := 0
-	num := len(keys)
-	batchSize := 4
-
-	buf := []Entry{
-		{Key: 6, Value: &Node{}},
-		{Key: 7, Value: &Node{}},
-	}
-	bufIdx := 0
-	bufNum := len(buf)
-
-	// 执行批量插入
-	inode.BatchInsertLastLevelWithMigrationAndMovement(migrate, &migrateIdx, migrateNum, keys, values, &idx, num, batchSize, buf, &bufIdx, bufNum)
-
-	// 输出结果
-	fmt.Println("Entries:", inode.Entries)
-	fmt.Println("HighKey:", inode.HighKey)
-	fmt.Println("LeftmostPtr:", inode.leftmostPtr)
-}
-func TestINode_BatchInsertLastLevelWithMovement(t *testing.T) {
-	// 创建一个 INode
-	inode := &INode{
-		Node: Node{
-			level:       1,
-			count:       0,
-			leftmostPtr: nil,
-		},
-		Entries: make([]Entry, 0),
-	}
-
-	// 示例数据
-	keys := []interface{}{3, 4, 5}
-	values := []*Node{&Node{}, &Node{}, &Node{}}
-	idx := 0
-	num := len(keys)
-	batchSize := 4
-
-	buf := []Entry{
-		{Key: 6, Value: &Node{}},
-		{Key: 7, Value: &Node{}},
-	}
-	bufIdx := 0
-	bufNum := len(buf)
-
-	// 执行批量插入
-	inode.BatchInsertLastLevelWithMovement(keys, values, &idx, num, batchSize, buf, &bufIdx, bufNum)
-
-	// 输出结果
-	fmt.Println("Entries:", inode.Entries)
-	fmt.Println("HighKey:", inode.HighKey)
-	fmt.Println("LeftmostPtr:", inode.leftmostPtr)
+func (m *MockNode) TryConvertLock(version uint64) bool {
+	return true
 }
 
-func TestINode_CalculateNodeNum(t *testing.T) {
-	var totalNum = 120
-	var numerator = 10
-	var remains = 5
-	var lastChunk, newNum int
-	batchSize := 10
-
-	inode := &INode{
-		Cardinality: 15,
-	}
-	inode.CalculateNodeNum(totalNum, &numerator, &remains, &lastChunk, &newNum, batchSize)
-
-	fmt.Println("Numerator:", numerator)
-	fmt.Println("Remains:", remains)
-	fmt.Println("LastChunk:", lastChunk)
-	fmt.Println("NewNum:", newNum)
+func (m *MockNode) ConvertUnlock() {
+	// Mock implementation
 }
 
-func TestINode_BatchInsertWithMigration(t *testing.T) {
-	inode := &INode{
-		Entries: make([]Entry, 0),
-		Node: Node{
-			level: 1,
-			count: 0,
-		},
-	}
-
-	migrate := []Entry{
-		{Key: 1, Value: &Node{}},
-		{Key: 2, Value: &Node{}},
-	}
-	migrateIdx := 0
-	migrateNum := len(migrate)
-
-	keys := []interface{}{3, 4, 5}
-	values := []*Node{{}, {}, {}}
-	idx := 0
-	num := len(keys)
-
-	batchSize := 4
-
-	buf := []Entry{
-		{Key: 6, Value: &Node{}},
-		{Key: 7, Value: &Node{}},
-	}
-	bufIdx := 0
-	bufNum := len(buf)
-
-	// 调用 BatchInsertWithMigration
-	inode.BatchInsertWithMigrationAndMoveMent(
-		migrate, &migrateIdx, migrateNum,
-		keys, values, &idx, num,
-		batchSize, buf, &bufIdx, bufNum,
-	)
-
-	// 输出结果
-	fmt.Printf("Entries: %+v\n", inode.Entries)
-	fmt.Printf("Count: %d\n", inode.count)
-	fmt.Printf("HighKey: %+v\n", inode.HighKey)
+func (m *MockNode) StabilizeAll(version uint64) bool {
+	return true
 }
 
-func TestINode_BatchInsertLastLevel(t *testing.T) {
-	keys := []interface{}{10, 20, 30}
-	values := make([]*Node, 3)
-	for i := range values {
-		values[i] = &Node{level: 1}
-	}
+func (m *MockNode) StabilizeBucket(loc int) bool {
+	return true
+}
 
-	inode := NewINode(1, nil, nil, nil)
-	inode.count = 0 // Starting with an empty node for simplicity
+func (m *MockNode) Hash(hv uint64) uint64 {
+	return hv
+}
 
-	// Assuming an FILL_FACTOR of 0.9 for this example and a high enough cardinality
-	newNum := new(int)
-	expectedNum := 0 // No new nodes should be created
-	*newNum = expectedNum
+// TestINode_Insert 测试单条插入
+func TestINode_Insert(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
 
-	resultNodes, err := inode.BatchInsertLastLevel(keys, values, len(keys), newNum)
+	newNode1 := NewNode(1)
+	// 插入第一条
+	err := inode.Insert(10, newNode1)
 	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
+		t.Fatalf("Insert failed: %v", err)
 	}
-	if len(resultNodes) != expectedNum {
-		t.Errorf("Expected %d new nodes, got %d", expectedNum, len(resultNodes))
+	if inode.count != 1 {
+		t.Errorf("Expected count to be 1, got %d", inode.count)
 	}
-	if inode.count != len(keys) {
-		t.Errorf("Expected count %d, got %d", len(keys), inode.count)
+	if inode.HighKey != 10 {
+		t.Errorf("Expected HighKey to be 10, got %v", inode.HighKey)
 	}
-	// Verify keys and values
+	if inode.leftmostPtr != nil {
+		t.Errorf("Expected leftmostPtr to be nil, got %v", inode.leftmostPtr)
+	}
+	if inode.Entries[0].Key != 10 {
+		t.Errorf("Expected Entries[0].Key to be 10, got %v", inode.Entries[0].Key)
+	}
+	if inode.Entries[0].Value != newNode1 {
+		t.Errorf("Expected Entries[0].Value to be node 1, got %v", inode.Entries[0].Value)
+	}
+
+	newNode2 := NewNode(2)
+	// 插入第二条
+	err = inode.InsertWithLeft(20, newNode2, NewNode(1))
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	if inode.count != 2 {
+		t.Errorf("Expected count to be 2, got %d", inode.count)
+	}
+	if inode.HighKey != 20 {
+		t.Errorf("Expected HighKey to be 20, got %v", inode.HighKey)
+	}
+	if inode.Entries[1].Key != 20 {
+		t.Errorf("Expected Entries[1].Key to be 20, got %v", inode.Entries[1].Key)
+	}
+	if inode.Entries[1].Value != newNode2 {
+		t.Errorf("Expected Entries[1].Value to be node 2, got %v", inode.Entries[1].Value)
+	}
+}
+
+// TestINode_Split 测试节点分裂
+func TestINode_Split(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
+	batchSize := 4
+	// 假设卡片容量为4
+	for i := 1; i <= batchSize; i++ {
+		err := inode.Insert(i*10, NewNode(i))
+		if err != nil {
+			t.Fatalf("Insert failed: %v", err)
+		}
+	}
+
+	// 分裂节点
+	newNode, splitKey := inode.Split()
+	if newNode == nil {
+		t.Fatalf("Split returned nil")
+	}
+	if splitKey != 30 {
+		t.Errorf("Expected splitKey to be 30, got %v", splitKey)
+	}
+	if inode.count != 2 {
+		t.Errorf("Expected original node count to be 2, got %d", inode.count)
+	}
+	if newNode.count != 1 {
+		t.Errorf("Expected new node count to be 1, got %d", newNode.count)
+	}
+	if inode.HighKey != 30 {
+		t.Errorf("Expected original node HighKey to be 30, got %v", inode.HighKey)
+	}
+	if newNode.HighKey != 40 {
+		t.Errorf("Expected new node HighKey to be 40, got %v", newNode.HighKey)
+	}
+	if inode.siblingPtr != &newNode.Node {
+		t.Errorf("Expected original node siblingPtr to point to new node")
+	}
+}
+
+// TestINode_BatchInsert 测试批量插入
+func TestINode_BatchInsert(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
+	keys := []interface{}{10, 20, 30}
+	values := []*Node{NewNode(1), NewNode(2), NewNode(3)}
+	num := 3
+
+	newNodes, err := inode.BatchInsert(keys, values, num)
+	if err != nil {
+		t.Fatalf("BatchInsert failed: %v", err)
+	}
+	if newNodes != nil {
+		t.Errorf("Expected no new nodes, got %v", newNodes)
+	}
+	if inode.count != 3 {
+		t.Errorf("Expected count to be 3, got %d", inode.count)
+	}
+	if inode.HighKey != 30 {
+		t.Errorf("Expected HighKey to be 30, got %v", inode.HighKey)
+	}
 	for i, key := range keys {
-		if inode.Entries[i].Key != key || inode.Entries[i].Value != values[i] {
-			t.Errorf("Entry %d did not match expected. Got key %v and value %v", i, inode.Entries[i].Key, inode.Entries[i].Value)
+		if inode.Entries[i].Key != key {
+			t.Errorf("Expected Entries[%d].Key to be %v, got %v", i, key, inode.Entries[i].Key)
+		}
+		if inode.Entries[i].Value != values[i] {
+			t.Errorf("Expected Entries[%d].Value to be node %d, got %v", i, i+1, inode.Entries[i].Value)
+		}
+	}
+
+	// 批量插入导致节点分裂
+	keysSplit := []interface{}{40, 50}
+	valuesSplit := []*Node{NewNode(4), NewNode(5)}
+	numSplit := 2
+
+	newNodes, err = inode.BatchInsert(keysSplit, valuesSplit, numSplit)
+	if err != nil {
+		t.Fatalf("BatchInsert failed: %v", err)
+	}
+	if newNodes == nil || len(newNodes) == 0 {
+		t.Errorf("Expected new nodes after split, got %v", newNodes)
+	}
+	if inode.count != 2 { // assuming split occurs after count=4, adjust according to cardinality
+		t.Errorf("Expected original node count to be 2 after split, got %d", inode.count)
+	}
+	if newNodes[0].count != 3 { // adjust based on BatchInsert logic
+		t.Errorf("Expected new node count to be 3, got %d", newNodes[0].count)
+	}
+	// Further assertions can be added based on the exact split logic
+}
+
+// TestINode_BatchMigrate 测试批量迁移
+func TestINode_BatchMigrate(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
+	migrate := []Entry{
+		{Key: 10, Value: NewNode(1)},
+		{Key: 20, Value: NewNode(2)},
+	}
+	migrateNum := 2
+	migrateIdx := 0
+
+	updatedIdx, err := inode.BatchMigrate(migrate, migrateIdx, migrateNum)
+	if err != nil {
+		t.Fatalf("BatchMigrate failed: %v", err)
+	}
+	if updatedIdx != 2 {
+		t.Errorf("Expected migrateIdx to be 2, got %d", updatedIdx)
+	}
+	if inode.count != 2 {
+		t.Errorf("Expected count to be 2, got %d", inode.count)
+	}
+	if inode.leftmostPtr != migrate[0].Value {
+		t.Errorf("Expected leftmostPtr to be node 1, got %v", inode.leftmostPtr)
+	}
+	for i, entry := range migrate[1:2] {
+		if inode.Entries[i].Key != entry.Key {
+			t.Errorf("Expected Entries[%d].Key to be %v, got %v", i, entry.Key, inode.Entries[i].Key)
+		}
+		if inode.Entries[i].Value != entry.Value {
+			t.Errorf("Expected Entries[%d].Value to be node %d, got %v", i, i+1, inode.Entries[i].Value)
 		}
 	}
 }
 
-// TestINodeSanityCheck 创建一些 INode 实例并调用 SanityCheck，观察输出
-func TestINodeSanityCheck(t *testing.T) {
-	// 创建具有确定关系的 INode 实例
-	rightNode := NewINode(1, 100, nil, nil)
-	middleNode := NewINode(1, 60, &rightNode.Node, nil)
-	leftNode := NewINode(1, 30, &middleNode.Node, nil)
-	middleNode.leftmostPtr = &leftNode.Node
-	rightNode.leftmostPtr = &middleNode.Node
-	// 添加条目
-	leftNode.Entries = []Entry{{Key: 10, Value: 10}, {Key: 20, Value: 20}}
-	leftNode.count = len(leftNode.Entries)
+// TestINode_BatchKvPair 测试批量键值对插入
+func TestINode_BatchKvPair(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
+	keys := []interface{}{10, 20, 30}
+	values := []*Node{NewNode(1), NewNode(2), NewNode(3)}
+	num := 3
+	batchSize := 2
+	idx := 0
 
-	middleNode.Entries = []Entry{{Key: 35, Value: 35}, {Key: 40, Value: 40}} // 故意设置错误的键顺序
-	middleNode.count = len(middleNode.Entries)
+	newIdx, reached, err := inode.BatchKvPair(keys, values, idx, num, batchSize)
+	if err != nil {
+		t.Fatalf("BatchKvPair failed: %v", err)
+	}
+	if newIdx != 2 {
+		t.Errorf("Expected newIdx to be 2, got %d", newIdx)
+	}
+	if !reached {
+		t.Errorf("Expected reached to be true, got false")
+	}
+	if inode.count != 2 {
+		t.Errorf("Expected count to be 2, got %d", inode.count)
+	}
+	if inode.HighKey != 20 {
+		t.Errorf("Expected HighKey to be 20, got %v", inode.HighKey)
+	}
 
-	rightNode.Entries = []Entry{{Key: 70, Value: 70}, {Key: 90, Value: 90}}
-	rightNode.count = len(rightNode.Entries)
-
-	// 调用 SanityCheck 并查看输出
-	leftNode.SanityCheck(30, false) // 应该输出因为 Key 顺序错误的信息
+	// 执行剩余插入
+	newIdx, reached, err = inode.BatchKvPair(keys, values, newIdx, num, batchSize)
+	if err != nil {
+		t.Fatalf("BatchKvPair failed on second call: %v", err)
+	}
+	if newIdx != 3 {
+		t.Errorf("Expected newIdx to be 3, got %d", newIdx)
+	}
+	if reached {
+		t.Errorf("Expected reached to be false, got true")
+	}
+	if inode.count != 3 {
+		t.Errorf("Expected count to be 3, got %d", inode.count)
+	}
+	if inode.HighKey != 30 {
+		t.Errorf("Expected HighKey to be 30, got %v", inode.HighKey)
+	}
 }
+
+// TestINode_BatchBuffer 测试批量缓冲区插入
+func TestINode_BatchBuffer(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
+	buf := []Entry{
+		{Key: 10, Value: NewNode(1)},
+		{Key: 20, Value: NewNode(2)},
+		{Key: 30, Value: NewNode(3)},
+	}
+	bufNum := 3
+	batchSize := 2
+	bufIdx := 0
+
+	newBufIdx, reached, err := inode.BatchBuffer(buf, bufIdx, bufNum, batchSize)
+	if err != nil {
+		t.Fatalf("BatchBuffer failed: %v", err)
+	}
+	if newBufIdx != 2 {
+		t.Errorf("Expected bufIdx to be 2, got %d", newBufIdx)
+	}
+	if !reached {
+		t.Errorf("Expected reached to be true, got false")
+	}
+	if inode.count != 2 {
+		t.Errorf("Expected count to be 2, got %d", inode.count)
+	}
+	if inode.HighKey != 20 {
+		t.Errorf("Expected HighKey to be 20, got %v", inode.HighKey)
+	}
+
+	// 执行剩余插入
+	newBufIdx, reached, err = inode.BatchBuffer(buf, newBufIdx, bufNum, batchSize)
+	if err != nil {
+		t.Fatalf("BatchBuffer failed on second call: %v", err)
+	}
+	if newBufIdx != 3 {
+		t.Errorf("Expected bufIdx to be 3, got %d", newBufIdx)
+	}
+	if reached {
+		t.Errorf("Expected reached to be false, got true")
+	}
+	if inode.count != 3 {
+		t.Errorf("Expected count to be 3, got %d", inode.count)
+	}
+	if inode.HighKey != 30 {
+		t.Errorf("Expected HighKey to be 30, got %v", inode.HighKey)
+	}
+}
+
+// TestINode_SplitAndBatchInsert 测试分裂后批量插入
+func TestINode_SplitAndBatchInsert(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
+	// 假设 batchSize = 2, cardinality = 4 (PageSize assumptions)
+	keys := []interface{}{10, 20, 30, 40}
+	values := []*Node{NewNode(1), NewNode(2), NewNode(3), NewNode(4)}
+	num := 4
+
+	// 批量插入
+	newNodes, err := inode.BatchInsert(keys, values, num)
+	if err != nil {
+		t.Fatalf("BatchInsert failed: %v", err)
+	}
+
+	if newNodes != nil {
+		t.Errorf("Expected no new nodes, got %v", newNodes)
+	}
+	if inode.count != 4 {
+		t.Errorf("Expected count to be 4, got %d", inode.count)
+	}
+	if inode.HighKey != 40 {
+		t.Errorf("Expected HighKey to be 40, got %v", inode.HighKey)
+	}
+
+	// 插入第5条，导致节点分裂
+	keysSplit := []interface{}{50, 60}
+	valuesSplit := []*Node{NewNode(5), NewNode(6)}
+	numSplit := 2
+
+	newNodes, err = inode.BatchInsert(keysSplit, valuesSplit, numSplit)
+	if err != nil {
+		t.Fatalf("BatchInsert after split failed: %v", err)
+	}
+
+	if newNodes == nil || len(newNodes) != 1 {
+		t.Errorf("Expected one new node after split, got %v", newNodes)
+	}
+	if inode.count != 2 {
+		t.Errorf("Expected original node count to be 2 after split, got %d", inode.count)
+	}
+	if inode.HighKey != 30 {
+		t.Errorf("Expected original node HighKey to be 30 after split, got %v", inode.HighKey)
+	}
+	if newNodes[0].count != 4 {
+		t.Errorf("Expected new node count to be 4, got %d", newNodes[0].count)
+	}
+	if newNodes[0].HighKey != 60 {
+		t.Errorf("Expected new node HighKey to be 60, got %v", newNodes[0].HighKey)
+	}
+}
+
+// TestINode_SanityCheck 测试节点的完整性检查
+func TestINode_SanityCheck(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
+	keys := []interface{}{10, 20, 30, 40}
+	values := []*Node{NewNode(1), NewNode(2), NewNode(3), NewNode(4)}
+	num := 4
+
+	for i := 0; i < num; i++ {
+		err := inode.Insert(keys[i], values[i])
+		if err != nil {
+			t.Fatalf("Insert failed: %v", err)
+		}
+	}
+
+	// 添加一个打乱顺序的键，期待 SanityCheck 报错
+	err := inode.Insert(25, NewNode(5))
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	// 进行 SanityCheck
+	inode.SanityCheck(nil, true)
+	// 预期输出应报告键顺序不正确
+	// 由于测试环境无法捕获标准输出，实际测试中可能需要调整 SanityCheck 方法以返回错误
+}
+
+// TestINode_ScanNode 测试 ScanNode 方法
+func TestINode_ScanNode(t *testing.T) {
+	inode := NewINodeForInsertInBatch(1)
+	sibling := NewNode(99)
+	inode.siblingPtr = sibling
+	inode.HighKey = 30
+
+	// 插入一些条目
+	keys := []interface{}{10, 20, 30}
+	values := []*Node{NewNode(1), NewNode(2), NewNode(3)}
+	num := 3
+
+	for i := 0; i < num; i++ {
+		err := inode.Insert(keys[i], values[i])
+		if err != nil {
+			t.Fatalf("Insert failed: %v", err)
+		}
+	}
+
+	// 测试 key < HighKey，应该返回相应的节点
+	node := inode.ScanNode(25)
+	if node == nil || node != values[1] {
+		t.Errorf("Expected ScanNode(25) to return node 2, got %v", node)
+	}
+
+	// 测试 key > HighKey，应该返回 sibling_ptr
+	node = inode.ScanNode(35)
+	if node == nil || node != sibling {
+		t.Errorf("Expected ScanNode(35) to return sibling node, got %v", node)
+	}
+
+	// 测试 key equal to HighKey
+	node = inode.ScanNode(30)
+	if node == nil || node != values[2] {
+		t.Errorf("Expected ScanNode(30) to return node 3, got %v", node)
+	}
+}
+
+// Additional tests can be added here for BatchInsertWithMigrationAndMovement, BatchInsertWithMovement, etc.
+
+// Example of using Print and SanityCheck (Note: In real tests, avoid using fmt.Println, use assertions instead)
+func ExampleINode_Print() {
+	inode := NewINodeForInsertInBatch(1)
+	keys := []interface{}{10, 20, 30}
+	values := []*Node{NewNode(1), NewNode(2), NewNode(3)}
+	num := 3
+
+	for i := 0; i < num; i++ {
+		inode.Insert(keys[i], values[i])
+	}
+
+	inode.Print()
+	// Output:
+	// LeftmostPtr: <nil>
+	// [0] Key: 10, Value: &blinkhash.MockNode{...}
+	// [1] Key: 20, Value: &blinkhash.MockNode{...}
+	// [2] Key: 30, Value: &blinkhash.MockNode{...}
+	// HighKey: 30
+}
+
+// Similarly, other methods like BatchInsertWithMigrationAndMovement can have their own test cases.

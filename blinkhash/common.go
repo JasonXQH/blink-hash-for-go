@@ -53,12 +53,20 @@ const (
 	BITS_PER_LONG = 64
 	LeafBTreeSize = PageSize
 	LeafHashSize  = 1024 * 256
-	HashFuncsNum  = 2
-	NumSlot       = 4
 )
 
 // compareKeys 比较两个键，需要根据键的实际类型进行具体实现
 func compareIntKeys(key1, key2 interface{}) int {
+	if key1 == nil && key2 == nil {
+		return 0 // 两者都为nil则相等
+	} else if key1 == nil {
+		// key1为nil但key2不为nil，则key1 < key2
+		return -1
+	} else if key2 == nil {
+		// key2为nil但key1不为nil，则key1 > key2
+		return 1
+	}
+
 	// 示例实现，假设键类型为 int
 	k1 := key1.(int)
 	k2 := key2.(int)
@@ -70,7 +78,11 @@ func compareIntKeys(key1, key2 interface{}) int {
 	return 0
 }
 
+// BLinkHash
 const (
-	LINKED      = false // 启用链接机制
-	FINGERPRINT = false // 启用指纹机制
+	LINKED           = false // 启用链接机制
+	FINGERPRINT      = false // 启用指纹机制
+	HashFuncsNum     = 2
+	NumSlot          = 4
+	EmptyFingerprint = 0
 )

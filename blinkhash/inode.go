@@ -29,7 +29,7 @@ func NewINode(level int, highKey interface{}, sibling, left NodeInterface) *INod
 		},
 		Cardinality: cardinality,
 		HighKey:     highKey,
-		Entries:     make([]Entry, cardinality),
+		Entries:     make([]Entry, 0, cardinality),
 	}
 	return inode
 }
@@ -85,15 +85,29 @@ func (in *INode) IsFull() bool {
 	return in.count == cap(in.Entries)
 }
 
-// findLowerBound 在有序切片中线性搜索，找到第一个不小于给定键的元素位置
-func (i *INode) findLowerBound(key interface{}) int {
-	for index, entry := range i.Entries {
-		// 假设 Key 是 int 类型进行比较，根据实际类型调整
-		if entry.Key.(int) >= key.(int) {
-			return index
+// FindLowerBound findLowerBound 在有序切片中线性搜索，找到第一个不小于给定键的元素位置
+func (in *INode) FindLowerBound(key interface{}) int {
+	keyInt, ok := key.(int)
+	if !ok {
+		panic("FindLowerBoundLinear: key is not of type int")
+	}
+
+	for i, entry := range in.Entries {
+		entryKey, ok := entry.Key.(int)
+		if !ok {
+			continue
+		}
+
+		if keyInt <= entryKey {
+			return i - 1 // 返回第一个小于等于 key 的元素前一个位置
 		}
 	}
-	return len(i.Entries) // 如果所有键都小于给定键，返回切片长度
+
+	// 如果没有找到，返回倒数第二个位置
+	if len(in.Entries) > 0 {
+		return len(in.Entries) - 1
+	}
+	return 0 // 如果切片为空，返回 0
 }
 
 // ScanNode 根据提供的键扫描并返回对应的节点
@@ -117,299 +131,412 @@ func (in *INode) ScanNode(key interface{}) *Node {
 			return nil // 或其他错误处理
 		}
 	}
-	//TODO实现继续
+	idx := in.FindLowerBound(key)
+	if idx >= 0 && idx < in.count {
+		if node, ok := in.Entries[idx].Value.(*Node); ok {
+			return node
+		}
+	} else {
+		if node, ok := in.leftmostPtr.(*Node); ok {
+			return node
+		}
+	}
 	return nil
 }
 
 // Insert 插入新的键值对到节点中，保持键的排序
-func (i *INode) Insert(key interface{}, value *Node, left *Node) {
+func (in *INode) Insert(key interface{}, value *Node) error {
 	// 查找插入位置
-	pos := i.findLowerBound(key)
+	pos := in.FindLowerBound(key)
 
-	// 插入前先扩展切片以留出空间
-	i.Entries = append(i.Entries[:pos+2], i.Entries[pos+1:]...)
+	// 确保 pos 不超过当前条目数
+	if pos < 0 || pos > len(in.Entries) {
+		return fmt.Errorf("invalid insert position: %d", pos)
+	}
 
-	// 更新左节点和当前键值
-	i.Entries[pos].Value = left
-	i.Entries[pos+1] = Entry{Key: key, Value: value}
+	// 将后续元素向后移动一位
+	in.Entries = append(in.Entries, Entry{}) // 扩展切片以防止越界
+	copy(in.Entries[pos+1:], in.Entries[pos:])
+	in.Entries[pos] = Entry{Key: key, Value: value}
+	// 更新计数
+	in.count++
 
-	// 增加节点计数
-	i.count++
+	// 更新 HighKey
+	if in.count > 0 {
+		in.HighKey = in.Entries[in.count-1].Key
+	}
+
+	return nil
 }
 
 // InsertWithLeft 插入新的键值对到节点中，并设置左侧节点
-func (i *INode) InsertWithLeft(key interface{}, value, left *Node) {
-	pos := i.findLowerBound(key)
-	// 在指定位置插入新元素，需要先扩展切片
-	i.Entries = append(i.Entries[:pos+1], append([]Entry{{Key: key, Value: value}}, i.Entries[pos+1:]...)...)
-	i.Entries[pos].Value = left
+func (in *INode) InsertWithLeft(key interface{}, value *Node, left *Node) error {
+	// 查找插入位置
+	pos := in.FindLowerBound(key)
+
+	// 确保 pos 不超过当前条目数
+	if pos < 0 || pos > len(in.Entries) {
+		return fmt.Errorf("invalid insert position: %d", pos)
+	}
+
+	// 在指定位置插入新元素
+	in.Entries = append(in.Entries, Entry{})          // 增加一个空条目
+	copy(in.Entries[pos+1:], in.Entries[pos:])        // 移动后续条目
+	in.Entries[pos].Value = left                      // 设置左侧指针
+	in.Entries[pos+1] = Entry{Key: key, Value: value} // 插入新条目
+
+	// 增加节点计数
+	in.count++
+
+	// 更新 HighKey
+	if in.count > 0 {
+		in.HighKey = in.Entries[in.count-1].Key
+	}
+
+	return nil
 }
 
-// Split 分割当前节点，返回新节点
 // Split 分裂当前 INode 节点，返回新的节点和分裂键
-func (inode *INode) Split() (*INode, interface{}) {
-	half := inode.count / 2
-	splitKey := inode.Entries[half].Key
+func (in *INode) Split() (*INode, interface{}) {
+	half := in.count / 2
+	splitKey := in.Entries[half].Key
 
 	// 创建新节点，容量为剩余条目数
-	newCount := inode.count - half - 1
+	newCount := in.count - half - 1
 	newNode := NewINodeForSplit(
-		inode.siblingPtr,
+		in.siblingPtr,
 		newCount,
-		inode.Entries[half].Value.(*Node),
-		inode.level,
-		inode.HighKey,
+		in.Entries[half].Value.(*Node),
+		in.level,
+		in.HighKey,
 	)
 
 	// 复制后一半的条目到新节点
-	copy(newNode.Entries, inode.Entries[half+1:])
+	copy(newNode.Entries, in.Entries[half+1:])
 
 	// 更新当前节点的 sibling 和 highKey
-	inode.siblingPtr = &newNode.Node
-	inode.HighKey = splitKey
-	inode.count = half
+	in.siblingPtr = &newNode.Node
+	in.HighKey = splitKey
+	in.count = half
 
 	return newNode, splitKey
 }
 
 // BatchMigrate 批量迁移条目到当前 INode 节点
-func (inode *INode) BatchMigrate(migrate []Entry, migrateIdx *int, migrateNum int) {
+// 返回更新后的 migrateIdx 和错误（如果有）
+func (in *INode) BatchMigrate(migrate []Entry, migrateIdx int, migrateNum int) (int, error) {
+	if migrateIdx >= migrateNum {
+		return migrateIdx, fmt.Errorf("migrateIdx out of range")
+	}
+
 	// 更新 leftmost_ptr
-	inode.leftmostPtr = migrate[*migrateIdx].Value.(*Node)
-	*migrateIdx++
+	in.leftmostPtr = migrate[migrateIdx].Value.(*Node)
+	migrateIdx++
 
 	// 计算需要复制的条目数
-	copyNum := migrateNum - *migrateIdx
+	copyNum := migrateNum - migrateIdx
+	if migrateIdx+copyNum > len(migrate) {
+		return migrateIdx, fmt.Errorf("copyNum exceeds migrate length")
+	}
 
 	// 批量复制条目到当前节点
-	inode.Entries = append(inode.Entries[:inode.count], migrate[*migrateIdx:*migrateIdx+copyNum]...)
-	inode.count += copyNum
+	in.Entries = append(in.Entries[:in.count], migrate[migrateIdx:migrateIdx+copyNum]...)
+	in.count += copyNum
+	migrateIdx += copyNum
 
-	// 更新 migrateIdx
-	*migrateIdx += copyNum
+	return migrateIdx, nil
 }
 
 // BatchKvPair 将键值对批量填充到 INode 的 Entries 中
-func (inode *INode) BatchKvPair(keys []interface{}, values []*Node, idx *int, num int, batchSize int) bool {
-	for inode.count < batchSize && *idx < num-1 {
-		inode.Entries = append(inode.Entries, Entry{
-			Key:   keys[*idx],
-			Value: values[*idx],
+// 返回更新后的 idx, 是否达到 batchSize, 和错误（如果有）
+func (in *INode) BatchKvPair(keys []interface{}, values []*Node, idx int, num int, batchSize int) (int, bool, error) {
+	for in.count < batchSize && idx < num-1 {
+		in.Entries = append(in.Entries, Entry{
+			Key:   keys[idx],
+			Value: values[idx],
 		})
-		inode.count++
-		(*idx)++
+		in.count++
+		idx++
 	}
 
-	if inode.count == batchSize {
+	if in.count == batchSize {
+		if idx >= num {
+			return idx, false, fmt.Errorf("idx out of range when setting HighKey")
+		}
 		// 达到批量大小，设置 high_key 并返回 true
-		inode.HighKey = keys[*idx]
-		return true
+		in.HighKey = keys[idx]
+		return idx, true, nil
+	}
+
+	if idx >= num {
+		return idx, false, fmt.Errorf("idx out of range when inserting last key-value pair")
 	}
 
 	// 插入最后一个键值对
-	inode.Entries = append(inode.Entries, Entry{
-		Key:   keys[*idx],
-		Value: values[*idx],
+	in.Entries = append(in.Entries, Entry{
+		Key:   keys[idx],
+		Value: values[idx],
 	})
-	inode.count++
-	(*idx)++
-	return false
+	in.count++
+	idx++
+	return idx, false, nil
 }
 
 // BatchBuffer 将缓冲区中的键值对批量填充到 INode 的 Entries 中
-func (inode *INode) BatchBuffer(buf []Entry, bufIdx *int, bufNum int, batchSize int) {
-	for inode.count < batchSize && *bufIdx < bufNum-1 {
-		inode.Entries = append(inode.Entries, Entry{
-			Key:   buf[*bufIdx].Key,
-			Value: buf[*bufIdx].Value,
+// 返回更新后的 bufIdx, 是否达到 batchSize, 和错误（如果有）
+func (in *INode) BatchBuffer(buf []Entry, bufIdx int, bufNum int, batchSize int) (int, bool, error) {
+	for in.count < batchSize && bufIdx < bufNum-1 {
+		in.Entries = append(in.Entries, Entry{
+			Key:   buf[bufIdx].Key,
+			Value: buf[bufIdx].Value,
 		})
-		inode.count++
-		(*bufIdx)++
+		in.count++
+		bufIdx++
 	}
 
-	if inode.count == batchSize {
+	if in.count == batchSize {
+		if bufIdx >= bufNum {
+			return bufIdx, false, fmt.Errorf("bufIdx out of range when setting HighKey")
+		}
 		// 达到批量大小，设置 high_key 并返回
-		inode.HighKey = buf[*bufIdx].Key
-		return
+		in.HighKey = buf[bufIdx].Key
+		return bufIdx, true, nil
+	}
+
+	if bufIdx >= bufNum {
+		return bufIdx, false, fmt.Errorf("bufIdx out of range when inserting last key-value pair")
 	}
 
 	// 插入最后一个键值对
-	inode.Entries = append(inode.Entries, Entry{
-		Key:   buf[*bufIdx].Key,
-		Value: buf[*bufIdx].Value,
+	in.Entries = append(in.Entries, Entry{
+		Key:   buf[bufIdx].Key,
+		Value: buf[bufIdx].Value,
 	})
-	inode.count++
-	(*bufIdx)++
+	in.count++
+	bufIdx++
+	return bufIdx, false, nil
 }
 
 // BatchInsertLastLevelWithMigrationAndMovement 批量插入到叶子节点，包括迁移和缓冲区处理
-func (inode *INode) BatchInsertLastLevelWithMigrationAndMovement(
-	migrate []Entry, migrateIdx *int, migrateNum int,
-	keys []interface{}, values []*Node, idx *int, num int, batchSize int,
-	buf []Entry, bufIdx *int, bufNum int,
-) {
+// BatchInsertLastLevelWithMigrationAndMovement 批量插入到叶子节点，包括迁移和缓冲区处理
+// 返回更新后的 migrateIdx, bufIdx 和错误（如果有）
+func (in *INode) BatchInsertLastLevelWithMigrationAndMovement(
+	migrate []Entry, migrateIdx int, migrateNum int,
+	keys []interface{}, values []*Node, idx int, num int, batchSize int,
+	buf []Entry, bufIdx int, bufNum int,
+) (int, int, error) {
 	fromStart := true
 
 	// 如果还有迁移条目，优先处理
-	if *migrateIdx < migrateNum {
+	if migrateIdx < migrateNum {
 		fromStart = false
-		inode.BatchMigrate(migrate, migrateIdx, migrateNum)
+		var err error
+		migrateIdx, err = in.BatchMigrate(migrate, migrateIdx, migrateNum)
+		if err != nil {
+			return migrateIdx, bufIdx, err
+		}
 	}
 
 	// 如果还有键值对需要插入，并且当前节点未满
-	if *idx < num && inode.count < batchSize {
+	if idx < num && in.count < batchSize {
 		if fromStart {
 			// 从头开始插入，更新 leftmost_ptr
-			inode.leftmostPtr = values[*idx]
-			(*idx)++
+			in.leftmostPtr = values[idx]
+			idx++
 		}
 		fromStart = false
 
-		if *idx < num {
+		if idx < num {
 			// 批量插入键值对
-			if inode.BatchKvPair(keys, values, idx, num, batchSize) {
-				return // 如果达到批量大小，直接返回
+			newIdx, reached, err := in.BatchKvPair(keys, values, idx, num, batchSize)
+			if err != nil {
+				return migrateIdx, bufIdx, err
+			}
+			idx = newIdx
+			if reached {
+				return migrateIdx, bufIdx, nil // 如果达到批量大小，直接返回
 			}
 
 			// 处理边界情况：插入完成但需要从缓冲区处理
-			if *idx == num && inode.count == batchSize && bufNum != 0 {
-				inode.HighKey = buf[*bufIdx].Key
-				return
+			if idx == num && in.count == batchSize && bufNum != 0 {
+				if bufIdx >= bufNum {
+					return migrateIdx, bufIdx, fmt.Errorf("bufIdx out of range when setting HighKey")
+				}
+				in.HighKey = buf[bufIdx].Key
+				return migrateIdx, bufIdx, nil
 			}
 		}
 	}
 
 	// 如果还有缓冲区条目需要插入，并且当前节点未满
-	if *bufIdx < bufNum && inode.count < batchSize {
+	if bufIdx < bufNum && in.count < batchSize {
 		if fromStart {
 			// 从缓冲区开始插入，更新 leftmost_ptr
-			inode.leftmostPtr = buf[*bufIdx].Value.(*Node)
-			(*bufIdx)++
+			in.leftmostPtr = buf[bufIdx].Value.(*Node)
+			bufIdx++
 		}
 		// 批量插入缓冲区条目
-		inode.BatchBuffer(buf, bufIdx, bufNum, batchSize)
+		var err error
+		bufIdx, _, err = in.BatchBuffer(buf, bufIdx, bufNum, batchSize)
+		if err != nil {
+			return migrateIdx, bufIdx, err
+		}
 	}
+
+	return migrateIdx, bufIdx, nil
 }
 
-// 此版本主要处理批量插入，同时考虑起始点设置和缓冲区的批量插入
-func (inode *INode) BatchInsertLastLevelWithMovement(
-	keys []interface{}, values []*Node, idx *int, num int, batchSize int, // 键值对
-	buf []Entry, bufIdx *int, bufNum int, // 缓冲区
-) {
+// BatchInsertLastLevelWithMovement 此版本主要处理批量插入，同时考虑起始点设置和缓冲区的批量插入
+// BatchInsertLastLevelWithMovement 批量插入到叶子节点，考虑迁移和缓冲区
+// 返回更新后的 idx, bufIdx 和错误（如果有）
+func (in *INode) BatchInsertLastLevelWithMovement(
+	keys []interface{}, values []*Node, idx int, num int, batchSize int, // 键值对
+	buf []Entry, bufIdx int, bufNum int, // 缓冲区
+) (int, int, error) {
 	fromStart := true
 
 	// Step 1: 插入键值对
-	if *idx < num {
-		inode.leftmostPtr = values[*idx]
-		(*idx)++
+	if idx < num {
+		in.leftmostPtr = values[idx]
+		idx++
 		fromStart = false
 
-		if *idx < num {
-			if inode.BatchKvPair(keys, values, idx, num, batchSize) {
-				return
+		if idx < num {
+			// 批量插入键值对
+			newIdx, reached, err := in.BatchKvPair(keys, values, idx, num, batchSize)
+			if err != nil {
+				return idx, bufIdx, err
+			}
+			idx = newIdx
+			if reached {
+				return idx, bufIdx, nil
 			}
 
 			// 如果达到批量大小，设置 HighKey 并退出
-			if *idx == num && inode.count == batchSize && bufNum != 0 {
-				inode.HighKey = buf[*bufIdx].Key
-				return
+			if idx == num && in.count == batchSize && bufNum != 0 {
+				if bufIdx >= bufNum {
+					return idx, bufIdx, fmt.Errorf("bufIdx out of range when setting HighKey")
+				}
+				in.HighKey = buf[bufIdx].Key
+				return idx, bufIdx, nil
 			}
 		}
 	}
 
 	// Step 2: 从缓冲区插入条目
-	if *bufIdx < bufNum && inode.count < batchSize {
+	if bufIdx < bufNum && in.count < batchSize {
 		if fromStart {
-			inode.leftmostPtr = buf[*bufIdx].Value.(*Node)
-			(*bufIdx)++
+			// 从缓冲区开始插入，更新 leftmost_ptr
+			in.leftmostPtr = buf[bufIdx].Value.(*Node)
+			bufIdx++
 		}
-		inode.BatchBuffer(buf, bufIdx, bufNum, batchSize)
+		// 批量插入缓冲区条目
+		var err error
+		bufIdx, _, err = in.BatchBuffer(buf, bufIdx, bufNum, batchSize)
+		if err != nil {
+			return idx, bufIdx, err
+		}
 	}
+
+	return idx, bufIdx, nil
 }
 
-func (inode *INode) BatchInsertLastLevel(keys []interface{}, values []*Node, num int, newNum *int,
-) ([]*INode, error) {
-	pos := inode.findLowerBound(keys[0])
-	batchSize := int(float64(inode.Cardinality) * FillFactor)
-	inplace := (inode.count + num) < inode.Cardinality
+// BatchInsertLastLevel 批量插入到叶子节点，包括迁移和缓冲区处理
+// 返回新节点集合、新Num 和错误（如果有）
+func (in *INode) BatchInsertLastLevel(keys []interface{}, values []*Node, num int, batchSize int) ([]*INode, error) {
+	pos := in.FindLowerBound(keys[0])
+	batchSizeCalc := int(float64(in.Cardinality) * FillFactor)
+	inplace := (in.count + num) < in.Cardinality
 	moveNum := 0
 	idx := 0
 	if pos < 0 {
-		moveNum = inode.count
+		moveNum = in.count
 	} else {
-		moveNum = inode.count - pos - 1
+		moveNum = in.count - pos - 1
 	}
 
 	if inplace { // 正常插入
-		inode.moveNormalInsertion(pos, num, moveNum)
+		in.moveNormalInsertion(pos, num, moveNum)
 		if pos < 0 { // 更新最左指针
-			inode.leftmostPtr = values[0]
+			in.leftmostPtr = values[0]
 		} else {
-			inode.Entries[pos].Value = values[0]
+			in.Entries[pos].Value = values[0]
 		}
 
-		for i, idx := pos+1, 0; idx < num; i, idx = i+1, idx+1 {
-			inode.Entries[i].Key = keys[idx]
-			inode.Entries[i].Value = values[idx]
+		for i, j := pos+1, 0; j < num; i, j = i+1, j+1 {
+			in.Entries[i].Key = keys[j]
+			in.Entries[i].Value = values[j]
 		}
-		inode.count += num
+		in.count += num
 		return nil, nil
 	}
 	// 需要数据迁移和可能的分裂
-	prevHighKey := inode.HighKey
+	prevHighKey := in.HighKey
 	if pos < 0 {
-		inode.leftmostPtr = values[0]
+		in.leftmostPtr = values[0]
 	} else {
-		inode.Entries[pos].Value = values[0]
+		in.Entries[pos].Value = values[0]
 	}
 
 	var migrate []Entry
-	if batchSize < pos { // 插入到中间，需要迁移
-		migrateNum := pos - batchSize
+	if batchSizeCalc < pos { // 插入到中间，需要迁移
+		migrateNum := pos - batchSizeCalc
 		migrate = make([]Entry, migrateNum)
-		copy(migrate, inode.Entries[batchSize:pos])
+		copy(migrate, in.Entries[batchSizeCalc:pos])
 
 		buf := make([]Entry, moveNum)
-		copy(buf, inode.Entries[pos+1:pos+1+moveNum])
-		inode.count = batchSize
+		copy(buf, in.Entries[pos+1:pos+1+moveNum])
+		in.count = batchSizeCalc
 
 		totalNum := num + moveNum + migrateNum
-		lastChunk := 0
-		numerator := totalNum / (batchSize + 1)
-		remains := totalNum % (batchSize + 1)
-		newNumValue := *newNum
-		inode.CalculateNodeNum(totalNum, &numerator, &remains, &lastChunk, newNum, batchSize)
+		newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
 
-		newNodes := make([]*INode, newNumValue)
+		newNodes := make([]*INode, newNum)
 		for i := range newNodes {
-			//newNodes[i] = &INode{Node: Node{level: inode.level}, Cardinality: inode.Cardinality}
-			newNodes[i] = NewINodeForInsertInBatch(inode.level)
+			newNodes[i] = NewINodeForInsertInBatch(in.level)
 		}
 
-		oldSibling := inode.siblingPtr
-		inode.siblingPtr = &newNodes[0].Node
-		for i := 0; i < newNumValue-1; i++ {
+		oldSibling := in.siblingPtr
+		in.siblingPtr = &newNodes[0].Node
+		for i := 0; i < newNum-1; i++ {
 			newNodes[i].siblingPtr = &newNodes[i+1].Node
-			newNodes[i].BatchInsertLastLevelWithMigrationAndMovement(migrate, &pos, migrateNum, keys, values, &idx, num, batchSize, buf, &pos, moveNum)
+			// 调用重构后的 BatchInsertLastLevelWithMigrationAndMovement
+			migrateIdx, bufIdx, err := newNodes[i].BatchInsertLastLevelWithMigrationAndMovement(
+				migrate, 0, migrateNum,
+				keys, values, idx, num, batchSizeCalc,
+				buf, 0, moveNum,
+			)
+			if err != nil {
+				return nil, err
+			}
+			idx = migrateIdx
+			bufIdx = bufIdx
 		}
-		newNodes[newNumValue-1].siblingPtr = oldSibling
-		newNodes[newNumValue-1].BatchInsertLastLevelWithMigrationAndMovement(migrate, &pos, migrateNum, keys, values, &idx, num, lastChunk, buf, &pos, moveNum)
-		newNodes[newNumValue-1].HighKey = prevHighKey
+		newNodes[newNum-1].siblingPtr = oldSibling
+		_, _, err := newNodes[newNum-1].BatchInsertLastLevelWithMigrationAndMovement(
+			migrate, 0, migrateNum,
+			keys, values, idx, num, lastChunk,
+			buf, 0, moveNum,
+		)
+		if err != nil {
+			return nil, err
+		}
+		newNodes[newNum-1].HighKey = prevHighKey
 		return newNodes, nil
 	} else {
 		moveIdx := 0
-		//....
+		// 处理非迁移的情况
 		buf := make([]Entry, moveNum)
-		copy(buf, inode.Entries[pos+1:pos+1+moveNum])
+		copy(buf, in.Entries[pos+1:pos+1+moveNum])
 		idx := 0
-		for i := pos + 1; i < batchSize && idx < num; i, idx = i+1, idx+1 {
-			inode.Entries[i].Key = keys[idx]
-			inode.Entries[i].Value = values[idx]
+		for i := pos + 1; i < batchSizeCalc && idx < num; i, idx = i+1, idx+1 {
+			in.Entries[i].Key = keys[idx]
+			in.Entries[i].Value = values[idx]
 		}
-		inode.count += idx - moveNum - 1
-		for ; inode.count < batchSize; inode.count, moveIdx = inode.count+1, moveIdx+1 {
-			inode.Entries[inode.count].Key = buf[moveIdx].Key
-			inode.Entries[inode.count].Value = buf[moveIdx].Value
+		in.count += idx - moveNum - 1
+		for ; in.count < batchSizeCalc; in.count, moveIdx = in.count+1, moveIdx+1 {
+			in.Entries[in.count].Key = buf[moveIdx].Key
+			in.Entries[in.count].Value = buf[moveIdx].Value
 		}
 		var newHighKey interface{}
 		if idx < num {
@@ -419,206 +546,265 @@ func (inode *INode) BatchInsertLastLevel(keys []interface{}, values []*Node, num
 		}
 
 		totalNum := num - idx + moveNum - moveIdx
-		lastChunk := 0
-		numerator := totalNum / (batchSize + 1)
-		remains := totalNum % (batchSize + 1)
-		newNumValue := *newNum
-		inode.CalculateNodeNum(totalNum, &numerator, &remains, &lastChunk, newNum, batchSize)
+		newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
 
-		newNodes := make([]*INode, newNumValue)
+		newNodes := make([]*INode, newNum)
 		for i := range newNodes {
-			newNodes[i] = NewINodeForInsertInBatch(inode.level)
+			newNodes[i] = NewINodeForInsertInBatch(in.level)
 		}
 
-		oldSibling := inode.siblingPtr
-		inode.siblingPtr = &newNodes[0].Node
-		for i := 0; i < newNumValue-1; i++ {
+		oldSibling := in.siblingPtr
+		in.siblingPtr = &newNodes[0].Node
+		for i := 0; i < newNum-1; i++ {
 			newNodes[i].siblingPtr = &newNodes[i+1].Node
-			newNodes[i].BatchInsertLastLevelWithMovement(keys, values, &idx, num, batchSize, buf, &moveIdx, moveNum)
+			// 调用重构后的 BatchInsertLastLevelWithMovement
+			_, _, err := newNodes[i].BatchInsertLastLevelWithMovement(
+				keys, values, idx, num, batchSizeCalc,
+				buf, moveIdx, moveNum,
+			)
+			if err != nil {
+				return nil, err
+			}
 		}
-		newNodes[newNumValue-1].siblingPtr = oldSibling
-		newNodes[newNumValue-1].BatchInsertLastLevelWithMovement(keys, values, &idx, num, lastChunk, buf, &moveIdx, moveNum)
-		newNodes[newNumValue-1].HighKey = newHighKey
+		newNodes[newNum-1].siblingPtr = oldSibling
+		_, _, err := newNodes[newNum-1].BatchInsertLastLevelWithMovement(
+			keys, values, idx, num, lastChunk,
+			buf, moveIdx, moveNum,
+		)
+		if err != nil {
+			return nil, err
+		}
+		newNodes[newNum-1].HighKey = newHighKey
 		return newNodes, nil
 	}
 }
 
-func (inode *INode) CalculateNodeNum(totalNum int, numerator, remains *int, lastChunk, newNum *int, batchSize int) {
-	if *numerator == 0 { // 只需要一个新节点
-		*newNum = 1
-		*lastChunk = *remains
+// CalculateNodeNum 计算需要的新节点数量和最后一个节点的条目数
+func (in *INode) CalculateNodeNum(totalNum int, batchSize int) (newNum int, lastChunk int) {
+	numerator := totalNum / (batchSize + 1)
+	remains := totalNum % (batchSize + 1)
+
+	if numerator == 0 { // 只需要一个新节点
+		newNum = 1
+		lastChunk = remains
 		return
 	}
 
 	// 需要多个新节点
-	if *remains == 0 { // 恰好匹配
-		*newNum = *numerator
-		*lastChunk = batchSize
+	if remains == 0 { // 恰好匹配
+		newNum = numerator
+		lastChunk = batchSize
 	} else {
-		if *remains < inode.Cardinality-batchSize { // 可以挤进最后一个新节点
-			*newNum = *numerator
-			*lastChunk = batchSize + *remains
+		if remains < in.Cardinality-batchSize { // 可以挤进最后一个新节点
+			newNum = numerator
+			lastChunk = batchSize + remains
 		} else { // 需要额外的新节点
-			*newNum = *numerator + 1
-			*lastChunk = *remains
+			newNum = numerator + 1
+			lastChunk = remains
 		}
 	}
+	return
 }
-func (inode *INode) InsertForRoot(keys []interface{}, values []*Node, left *Node, num int) {
-	inode.leftmostPtr = left
+
+func (in *INode) InsertForRoot(keys []interface{}, values []*Node, left *Node, num int) {
+	in.leftmostPtr = left
 	for i := 0; i < num; i++ {
-		inode.Entries = append(inode.Entries, Entry{
+		in.Entries = append(in.Entries, Entry{
 			Key:   keys[i],
 			Value: values[i],
 		})
-		inode.count++
+		in.count++
 	}
 }
 
-func (inode *INode) moveNormalInsertion(pos, num, moveNum int) {
+func (in *INode) moveNormalInsertion(pos, num, moveNum int) {
 	// 使用 Go 的切片操作来模拟 C++ 的 `memmove`
-	copy(inode.Entries[pos+num+1:], inode.Entries[pos+1:pos+1+moveNum])
+	copy(in.Entries[pos+num+1:], in.Entries[pos+1:pos+1+moveNum])
 }
 
-func (inode *INode) RightmostPtr() *Node {
-	if inode.count == 0 {
+func (in *INode) RightmostPtr() *Node {
+	if in.count == 0 {
 		return nil
 	}
-	return inode.Entries[inode.count-1].Value.(*Node)
+	return in.Entries[in.count-1].Value.(*Node)
 }
 
-func (inode *INode) Print() {
-	fmt.Printf("LeftmostPtr: %v\n", inode.leftmostPtr)
-	for i, entry := range inode.Entries[:inode.count] {
+func (in *INode) Print() {
+	fmt.Printf("LeftmostPtr: %v\n", in.leftmostPtr)
+	for i, entry := range in.Entries[:in.count] {
 		fmt.Printf("[%d] Key: %v, Value: %v\n", i, entry.Key, entry.Value)
 	}
-	fmt.Printf("HighKey: %v\n\n", inode.HighKey)
+	fmt.Printf("HighKey: %v\n\n", in.HighKey)
 }
 
-func (inode *INode) SanityCheck(prevHighKey interface{}, first bool) {
+func (in *INode) SanityCheck(prevHighKey interface{}, first bool) {
 	// 检查键的顺序是否正确
-	for i := 0; i < inode.count-1; i++ {
-		for j := i + 1; j < inode.count; j++ {
-			if inode.Entries[i].Key.(int) > inode.Entries[j].Key.(int) {
+	for i := 0; i < in.count-1; i++ {
+		for j := i + 1; j < in.count; j++ {
+			if in.Entries[i].Key.(int) > in.Entries[j].Key.(int) {
 				fmt.Printf("INode: Key order is not preserved!!\n")
-				fmt.Printf("[%d].Key: %v\t[%d].Key: %v at node %p\n", i, inode.Entries[i].Key, j, inode.Entries[j].Key, inode)
+				fmt.Printf("[%d].Key: %v\t[%d].Key: %v at node %p\n", i, in.Entries[i].Key, j, in.Entries[j].Key, in)
 			}
 		}
 	}
 
 	// 检查每个键是否符合 highKey 和 prevHighKey 的约束
-	for i := 0; i < inode.count; i++ {
-		if inode.siblingPtr != nil && inode.Entries[i].Key.(int) > inode.HighKey.(int) {
-			fmt.Printf("INode: %d (%v) is higher than high key %v at node %p\n", i, inode.Entries[i].Key, inode.HighKey, inode)
+	for i := 0; i < in.count; i++ {
+		if in.siblingPtr != nil && in.Entries[i].Key.(int) > in.HighKey.(int) {
+			fmt.Printf("INode: %d (%v) is higher than high key %v at node %p\n", i, in.Entries[i].Key, in.HighKey, in)
 		}
 		if !first {
-			if inode.siblingPtr != nil && inode.Entries[i].Key.(int) <= prevHighKey.(int) {
-				fmt.Printf("INode: %d (%v) is smaller than previous high key %v\n", i, inode.Entries[i].Key, prevHighKey)
-				fmt.Printf("--------- Node Address: %p, Current HighKey: %v\n", inode, inode.HighKey)
+			if in.siblingPtr != nil && in.Entries[i].Key.(int) <= prevHighKey.(int) {
+				fmt.Printf("INode: %d (%v) is smaller than previous high key %v\n", i, in.Entries[i].Key, prevHighKey)
+				fmt.Printf("--------- Node Address: %p, Current HighKey: %v\n", in, in.HighKey)
 			}
 		}
 	}
 	// 如果有 sibling 节点，递归检查下一个节点
-	if inode.siblingPtr != nil {
-		siblingPtr := inode.siblingPtr
-		siblingPtr.SanityCheck(inode.HighKey, false)
+	if in.siblingPtr != nil {
+		siblingPtr := in.siblingPtr
+		siblingPtr.SanityCheck(in.HighKey, false)
 	}
 }
 
-func (inode *INode) BatchInsertWithMigrationAndMoveMent(
-	migrate []Entry, migrateIdx *int, migrateNum int,
-	keys []interface{}, values []*Node, idx *int, num int,
-	batchSize int, buf []Entry, bufIdx *int, bufNum int,
-) {
+// BatchInsertWithMigrationAndMovement 批量插入到叶子节点，包括迁移和缓冲区处理
+// 返回更新后的 migrateIdx, bufIdx 和错误（如果有）
+func (in *INode) BatchInsertWithMigrationAndMovement(
+	migrate []Entry, migrateIdx int, migrateNum int,
+	keys []interface{}, values []*Node, idx int, num int,
+	batchSize int, buf []Entry, bufIdx int, bufNum int,
+) (int, int, error) {
 	fromStart := true
 
-	// 处理迁移逻辑
-	if *migrateIdx < migrateNum {
+	// 如果还有迁移条目，优先处理
+	if migrateIdx < migrateNum {
 		fromStart = false
-		inode.BatchMigrate(migrate, migrateIdx, migrateNum)
+		var err error
+		migrateIdx, err = in.BatchMigrate(migrate, migrateIdx, migrateNum)
+		if err != nil {
+			return migrateIdx, bufIdx, err
+		}
 	}
 
-	// 批量插入键值对
-	if *idx < num && inode.count < batchSize {
+	// 如果还有键值对需要插入，并且当前节点未满
+	if idx < num && in.count < batchSize {
 		if fromStart {
-			inode.leftmostPtr = values[*idx]
-			(*idx)++
+			in.leftmostPtr = values[idx]
+			idx++
 		}
 		fromStart = false
-		if *idx < num {
-			if inode.BatchKvPair(keys, values, idx, num, batchSize) {
-				return
+
+		if idx < num {
+			var reached bool
+			var err error
+			idx, reached, err = in.BatchKvPair(keys, values, idx, num, batchSize)
+			if err != nil {
+				return migrateIdx, bufIdx, err
 			}
-			if *idx == num && inode.count == batchSize && bufNum != 0 {
-				inode.HighKey = buf[*bufIdx].Key
+			if reached {
+				return migrateIdx, bufIdx, nil // 如果达到批量大小，直接返回
+			}
+			if idx == num && in.count == batchSize && bufNum != 0 {
+				if bufIdx >= bufNum {
+					return migrateIdx, bufIdx, fmt.Errorf("bufIdx out of range when setting HighKey")
+				}
+				in.HighKey = buf[bufIdx].Key
+			}
+		}
+	}
+
+	// 如果还有缓冲区条目需要插入，并且当前节点未满
+	if bufIdx < bufNum && in.count < batchSize {
+		if fromStart {
+			in.leftmostPtr = buf[bufIdx].Value.(*Node)
+			bufIdx++
+		}
+		var _ bool
+		var err error
+		bufIdx, _, err = in.BatchBuffer(buf, bufIdx, bufNum, batchSize)
+		if err != nil {
+			return migrateIdx, bufIdx, err
+		}
+	}
+
+	return migrateIdx, bufIdx, nil
+}
+
+// BatchInsertWithMovement 批量插入到叶子节点，考虑迁移和缓冲区
+// 返回更新后的 idx, bufIdx 和错误（如果有）
+func (in *INode) BatchInsertWithMovement(
+	keys []interface{}, values []*Node, idx int, num int,
+	batchSize int, buf []Entry, bufIdx int, bufNum int,
+) (int, int, error) {
+	fromStart := true
+
+	// 批量插入键值对
+	if idx < num {
+		fromStart = false
+		in.leftmostPtr = values[idx]
+		idx++
+		if idx < num {
+			var reached bool
+			var err error
+			idx, reached, err = in.BatchKvPair(keys, values, idx, num, batchSize)
+			if err != nil {
+				return idx, bufIdx, err
+			}
+			if reached {
+				return idx, bufIdx, nil
+			}
+			if idx == num && in.count == batchSize && bufNum != 0 {
+				if bufIdx >= bufNum {
+					return idx, bufIdx, fmt.Errorf("bufIdx out of range when setting HighKey")
+				}
+				in.HighKey = buf[bufIdx].Key
 			}
 		}
 	}
 
 	// 从缓冲区插入键值对
-	if *bufIdx < bufNum && inode.count < batchSize {
+	if bufIdx < bufNum && in.count < batchSize {
 		if fromStart {
-			inode.leftmostPtr = buf[*bufIdx].Value.(*Node)
-			(*bufIdx)++
+			in.leftmostPtr = buf[bufIdx].Value.(*Node)
+			bufIdx++
 		}
-		inode.BatchBuffer(buf, bufIdx, bufNum, batchSize)
+		var _ bool
+		var err error
+		bufIdx, _, err = in.BatchBuffer(buf, bufIdx, bufNum, batchSize)
+		if err != nil {
+			return idx, bufIdx, err
+		}
 	}
+
+	return idx, bufIdx, nil
 }
 
-func (inode *INode) BatchInsertWithMovement(
-	keys []interface{}, values []*Node, idx *int, num int,
-	batchSize int, buf []Entry, bufIdx *int, bufNum int,
-) {
-	fromStart := true
-
-	// 批量插入键值对
-	if *idx < num {
-		fromStart = false
-		inode.leftmostPtr = values[*idx]
-		(*idx)++
-		if *idx < num {
-			if inode.BatchKvPair(keys, values, idx, num, batchSize) {
-				return
-			}
-			if *idx == num && inode.count == batchSize && bufNum != 0 {
-				inode.HighKey = buf[*bufIdx].Key
-			}
-		}
-	}
-
-	// 从缓冲区插入键值对
-	if *bufIdx < bufNum && inode.count < batchSize {
-		if fromStart {
-			inode.leftmostPtr = buf[*bufIdx].Value.(*Node)
-			(*bufIdx)++
-		}
-		inode.BatchBuffer(buf, bufIdx, bufNum, batchSize)
-	}
-}
-
-func (inode *INode) BatchInsert(
-	keys []interface{}, values []*Node, num int, newNum *int,
-) []*INode {
-	pos := inode.findLowerBound(keys[0])
-	batchSize := int(float64(inode.Cardinality) * FillFactor)
-	inPlace := (inode.count + num) < inode.Cardinality
+// BatchInsert 批量插入到叶子节点，包括迁移和缓冲区处理
+// 返回新节点集合和错误（如果有）
+func (in *INode) BatchInsert(
+	keys []interface{}, values []*Node, num int,
+) ([]*INode, error) {
+	pos := in.FindLowerBound(keys[0])
+	batchSize := int(float64(in.Cardinality) * FillFactor)
+	inPlace := (in.count + num) < in.Cardinality
 	moveNum := 0
 	idx := 0
 
 	if pos < 0 {
-		moveNum = inode.count
+		moveNum = in.count
 	} else {
-		moveNum = inode.count - pos - 1
+		moveNum = in.count - pos - 1
 	}
 
 	// Case 1: Insert in-place
 	if inPlace {
-		inode.moveNormalInsertion(pos, num, moveNum)
-		for i := pos + 1; i < pos+num+1; i, idx = i+1, idx+1 {
-			inode.Entries[i] = Entry{Key: keys[idx], Value: values[idx]}
+		in.moveNormalInsertion(pos, num, moveNum)
+		for i, j := pos+1, 0; j < num; i, j = i+1, j+1 {
+			in.Entries[i] = Entry{Key: keys[j], Value: values[j]}
 		}
-		inode.count += num
-		return nil
+		in.count += num
+		in.HighKey = keys[num-1]
+		return nil, nil
 	}
 
 	// Case 2: Split the node for insertion
@@ -626,104 +812,123 @@ func (inode *INode) BatchInsert(
 		// Migrate entries
 		migrateNum := pos - batchSize
 		migrate := make([]Entry, migrateNum)
-		copy(migrate, inode.Entries[batchSize:batchSize+migrateNum])
+		copy(migrate, in.Entries[batchSize:batchSize+migrateNum])
 
 		// Buffer entries to be moved
-		buf := make([]Entry, moveNum)
-		copy(buf, inode.Entries[pos+1:pos+1+moveNum])
+		bufEntries := make([]Entry, moveNum)
+		copy(bufEntries, in.Entries[pos+1:pos+1+moveNum])
 
 		// Adjust current node
-		inode.count = batchSize
+		in.count = batchSize
+
+		// Calculate new nodes needed
 		totalNum := num + moveNum + migrateNum
-		lastChunk, numerator, remains := 0, 0, 0
-		inode.CalculateNodeNum(totalNum, &numerator, &remains, &lastChunk, newNum, batchSize)
+		newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSize)
 
 		// Create new sibling nodes
-		newNodes := make([]*INode, *newNum)
-		for i := 0; i < *newNum; i++ {
-			newNodes[i] = NewINodeForInsertInBatch(inode.level)
+		newNodes := make([]*INode, newNum)
+		for i := 0; i < newNum; i++ {
+			newNodes[i] = NewINodeForInsertInBatch(in.level)
 		}
 
 		// Adjust sibling pointers
-		oldSibling := inode.siblingPtr
-		inode.siblingPtr = &newNodes[0].Node
+		oldSibling := in.siblingPtr
+		in.siblingPtr = &newNodes[0].Node
 
 		// Insert data into sibling nodes
 		migrateIdx, moveIdx := 0, 0
-		prevHighKey := inode.HighKey
-		inode.HighKey = migrate[migrateIdx].Key
+		prevHighKey := in.HighKey
+		if migrateNum > 0 {
+			in.HighKey = migrate[migrateIdx].Key
+		}
 
-		for i := 0; i < *newNum-1; i++ {
+		for i := 0; i < newNum-1; i++ {
 			newNodes[i].siblingPtr = &newNodes[i+1].Node
-			newNodes[i].BatchInsertWithMigrationAndMoveMent(
-				migrate, &migrateIdx, migrateNum, keys, values, &idx, num,
-				batchSize, buf, &moveIdx, moveNum,
+			var err error
+			migrateIdx, moveIdx, err = newNodes[i].BatchInsertWithMigrationAndMovement(
+				migrate, migrateIdx, migrateNum,
+				keys, values, idx, num,
+				batchSize, bufEntries, moveIdx, moveNum,
 			)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		// Last node adjustments
-		newNodes[*newNum-1].siblingPtr = oldSibling
-		newNodes[*newNum-1].HighKey = prevHighKey
-		newNodes[*newNum-1].BatchInsertWithMigrationAndMoveMent(
-			migrate, &migrateIdx, migrateNum, keys, values, &idx, num,
-			lastChunk, buf, &moveIdx, moveNum,
+		newNodes[newNum-1].siblingPtr = oldSibling
+		newNodes[newNum-1].HighKey = prevHighKey
+		_, _, err := newNodes[newNum-1].BatchInsertWithMigrationAndMovement(
+			migrate, migrateIdx, migrateNum,
+			keys, values, idx, num,
+			lastChunk, bufEntries, moveIdx, moveNum,
 		)
+		if err != nil {
+			return nil, err
+		}
 
-		return newNodes
+		return newNodes, nil
 	}
 
 	// Case 3: Insert into the middle without migration
 	moveIdx := 0
-	buf := make([]Entry, moveNum)
-	copy(buf, inode.Entries[pos+1:pos+1+moveNum])
+	bufEntries := make([]Entry, moveNum)
+	copy(bufEntries, in.Entries[pos+1:pos+1+moveNum])
 
 	// Fill the current node
 	for i := pos + 1; i < batchSize && idx < num; i, idx = i+1, idx+1 {
-		inode.Entries[i] = Entry{Key: keys[idx], Value: values[idx]}
+		in.Entries[i] = Entry{Key: keys[idx], Value: values[idx]}
 	}
 
-	inode.count += (idx - moveNum)
-	for inode.count < batchSize {
-		inode.Entries[inode.count] = buf[moveIdx]
-		inode.count++
+	in.count += (idx - moveNum)
+	for in.count < batchSize && moveIdx < moveNum {
+		in.Entries[in.count] = bufEntries[moveIdx]
+		in.count++
 		moveIdx++
 	}
 
-	prevHighKey := inode.HighKey
+	prevHighKey := in.HighKey
 	if idx < num {
-		inode.HighKey = keys[idx]
-	} else {
-		inode.HighKey = buf[moveIdx].Key
+		in.HighKey = keys[idx]
+	} else if moveIdx < moveNum {
+		in.HighKey = bufEntries[moveIdx].Key
 	}
 
+	// Calculate new nodes needed
 	totalNum := num - idx + moveNum - moveIdx
-	lastChunk, numerator, remains := 0, 0, 0
-	inode.CalculateNodeNum(totalNum, &numerator, &remains, &lastChunk, newNum, batchSize)
+	newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSize)
 
 	// Create new sibling nodes
-	newNodes := make([]*INode, *newNum)
-	for i := 0; i < *newNum; i++ {
-		newNodes[i] = NewINodeForInsertInBatch(inode.level)
+	newNodes := make([]*INode, newNum)
+	for i := 0; i < newNum; i++ {
+		newNodes[i] = NewINodeForInsertInBatch(in.level)
 	}
 
 	// Adjust sibling pointers
-	oldSibling := inode.siblingPtr
-	inode.siblingPtr = &newNodes[0].Node
+	oldSibling := in.siblingPtr
+	in.siblingPtr = &newNodes[0].Node
 
 	// Insert data into sibling nodes
-	for i := 0; i < *newNum-1; i++ {
+	for i := 0; i < newNum-1; i++ {
 		newNodes[i].siblingPtr = &newNodes[i+1].Node
-		newNodes[i].BatchInsertWithMovement(
-			keys, values, &idx, num, batchSize, buf, &moveIdx, moveNum,
+		var err error
+		idx, moveIdx, err = newNodes[i].BatchInsertWithMovement(
+			keys, values, idx, num, batchSize, bufEntries, moveIdx, moveNum,
 		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Last node adjustments
-	newNodes[*newNum-1].siblingPtr = oldSibling
-	newNodes[*newNum-1].HighKey = prevHighKey
-	newNodes[*newNum-1].BatchInsertWithMovement(
-		keys, values, &idx, num, lastChunk, buf, &moveIdx, moveNum,
+	newNodes[newNum-1].siblingPtr = oldSibling
+	newNodes[newNum-1].HighKey = prevHighKey
+	_, _, err := newNodes[newNum-1].BatchInsertWithMovement(
+		keys, values, idx, num, lastChunk, bufEntries, moveIdx, moveNum,
 	)
+	if err != nil {
+		return nil, err
+	}
 
-	return newNodes
+	return newNodes, nil
 }

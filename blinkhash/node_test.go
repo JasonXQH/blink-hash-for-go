@@ -99,7 +99,7 @@ func TestBatchBuffer(t *testing.T) {
 	inode := NewINode(1, nil, nil, nil)
 
 	// 执行 BatchBuffer
-	inode.BatchBuffer(buf, &bufIdx, bufNum, batchSize)
+	inode.BatchBuffer(buf, bufIdx, bufNum, batchSize)
 
 	// 验证结果
 	if inode.count != batchSize {

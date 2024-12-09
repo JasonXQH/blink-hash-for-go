@@ -519,3 +519,12 @@ func (b *LNodeBTree) batchInsert(buf []Entry, batchSize int, from *int, to int) 
 	// 更新 HighKey
 	b.HighKey = b.Entries[b.count-1].Key
 }
+
+// BatchInsert 批量插入条目到 B-tree 节点
+func (b *LNodeBTree) BatchInsert(entries []Entry) {
+	b.Entries = append(b.Entries, entries...)
+	b.count += len(entries)
+	if b.count > 0 {
+		b.HighKey = b.Entries[b.count-1].Key
+	}
+}
