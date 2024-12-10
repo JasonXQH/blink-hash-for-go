@@ -14,8 +14,8 @@ type INode struct {
 	Entries     []Entry     // 条目切片
 }
 
-func (in *INode) getType() NodeType {
-	return INNERNode
+func (in *INode) GetHighKey() interface{} {
+	return in.HighKey
 }
 
 // NewINode 创建并初始化一个 INode 实例，适用于各种构造场景
@@ -92,22 +92,12 @@ func (in *INode) FindLowerBound(key interface{}) int {
 		panic("FindLowerBoundLinear: key is not of type int")
 	}
 
-	for i, entry := range in.Entries {
-		entryKey, ok := entry.Key.(int)
-		if !ok {
-			continue
-		}
-
-		if keyInt <= entryKey {
-			return i - 1 // 返回第一个小于等于 key 的元素前一个位置
+	for index, entry := range in.Entries[:in.count] {
+		if entry.Key.(int) >= keyInt {
+			return index - 1
 		}
 	}
-
-	// 如果没有找到，返回倒数第二个位置
-	if len(in.Entries) > 0 {
-		return len(in.Entries) - 1
-	}
-	return 0 // 如果切片为空，返回 0
+	return in.count - 1
 }
 
 // ScanNode 根据提供的键扫描并返回对应的节点
@@ -145,19 +135,19 @@ func (in *INode) ScanNode(key interface{}) *Node {
 }
 
 // Insert 插入新的键值对到节点中，保持键的排序
-func (in *INode) Insert(key interface{}, value *Node) error {
+func (in *INode) Insert(key interface{}, value interface{}, version uint64) int {
 	// 查找插入位置
 	pos := in.FindLowerBound(key)
 
 	// 确保 pos 不超过当前条目数
-	if pos < 0 || pos > len(in.Entries) {
-		return fmt.Errorf("invalid insert position: %d", pos)
-	}
+	//if pos < 0 || pos > len(in.Entries) {
+	//	return fmt.Errorf("invalid insert position: %d", pos)
+	//}
 
 	// 将后续元素向后移动一位
 	in.Entries = append(in.Entries, Entry{}) // 扩展切片以防止越界
-	copy(in.Entries[pos+1:], in.Entries[pos:])
-	in.Entries[pos] = Entry{Key: key, Value: value}
+	copy(in.Entries[pos+2:], in.Entries[pos+1:])
+	in.Entries[pos+1] = Entry{Key: key, Value: value}
 	// 更新计数
 	in.count++
 
@@ -166,7 +156,7 @@ func (in *INode) Insert(key interface{}, value *Node) error {
 		in.HighKey = in.Entries[in.count-1].Key
 	}
 
-	return nil
+	return InsertSuccess
 }
 
 // InsertWithLeft 插入新的键值对到节点中，并设置左侧节点
@@ -175,15 +165,15 @@ func (in *INode) InsertWithLeft(key interface{}, value *Node, left *Node) error 
 	pos := in.FindLowerBound(key)
 
 	// 确保 pos 不超过当前条目数
-	if pos < 0 || pos > len(in.Entries) {
-		return fmt.Errorf("invalid insert position: %d", pos)
-	}
+	//if pos < 0 || pos > len(in.Entries) {
+	//	return fmt.Errorf("invalid insert position: %d", pos)
+	//}
 
 	// 在指定位置插入新元素
-	in.Entries = append(in.Entries, Entry{})          // 增加一个空条目
-	copy(in.Entries[pos+1:], in.Entries[pos:])        // 移动后续条目
-	in.Entries[pos].Value = left                      // 设置左侧指针
-	in.Entries[pos+1] = Entry{Key: key, Value: value} // 插入新条目
+	in.Entries = append(in.Entries, Entry{}) // 扩展切片以防止越界
+	copy(in.Entries[pos+2:], in.Entries[pos+1:])
+	in.Entries[pos+1] = Entry{Key: key, Value: value}
+	in.Entries[pos].Value = left // 设置左侧指针
 
 	// 增加节点计数
 	in.count++
@@ -618,8 +608,23 @@ func (in *INode) InsertForRoot(keys []interface{}, values []*Node, left *Node, n
 }
 
 func (in *INode) moveNormalInsertion(pos, num, moveNum int) {
-	// 使用 Go 的切片操作来模拟 C++ 的 `memmove`
-	copy(in.Entries[pos+num+1:], in.Entries[pos+1:pos+1+moveNum])
+	// 扩展 Entries 以保证 pos+num+1 的位置有效
+	if pos+num+1 > len(in.Entries) {
+		in.Entries = append(in.Entries, make([]Entry, pos+num+1-len(in.Entries))...)
+	}
+
+	// 计算目标位置及需要移动的元素数量
+	targetPos := pos + num + 1
+	sourcePos := pos + 1
+
+	// 如果目标位置超出了当前 Entries 的大小，就需要扩展
+	if targetPos+moveNum > len(in.Entries) {
+		// 需要扩展 Entries 的大小
+		in.Entries = append(in.Entries, make([]Entry, targetPos+moveNum-len(in.Entries))...)
+	}
+
+	// 执行 copy 操作
+	copy(in.Entries[targetPos:], in.Entries[sourcePos:sourcePos+moveNum])
 }
 
 func (in *INode) RightmostPtr() *Node {
@@ -808,6 +813,7 @@ func (in *INode) BatchInsert(
 	}
 
 	// Case 2: Split the node for insertion
+	// need insert in the middle (migrated + new kvs + moved)
 	if batchSize < pos {
 		// Migrate entries
 		migrateNum := pos - batchSize
@@ -871,17 +877,22 @@ func (in *INode) BatchInsert(
 	}
 
 	// Case 3: Insert into the middle without migration
+	// need insert in the middle (new_kvs + moved)
 	moveIdx := 0
 	bufEntries := make([]Entry, moveNum)
 	copy(bufEntries, in.Entries[pos+1:pos+1+moveNum])
 
 	// Fill the current node
 	for i := pos + 1; i < batchSize && idx < num; i, idx = i+1, idx+1 {
+
 		in.Entries[i] = Entry{Key: keys[idx], Value: values[idx]}
 	}
 
 	in.count += (idx - moveNum)
 	for in.count < batchSize && moveIdx < moveNum {
+		if len(in.Entries) <= in.count {
+			in.Entries = append(in.Entries, Entry{}) // Expanding the slice if needed
+		}
 		in.Entries[in.count] = bufEntries[moveIdx]
 		in.count++
 		moveIdx++
@@ -931,4 +942,15 @@ func (in *INode) BatchInsert(
 	}
 
 	return newNodes, nil
+}
+
+func (n *INode) GetRightmostPtr() NodeInterface {
+	if len(n.Entries) > 0 {
+		value, ok := n.Entries[len(n.Entries)-1].Value.(NodeInterface)
+		if !ok {
+			panic("Inode GetRightmostPtr should be NodeInterface")
+		}
+		return value
+	}
+	return nil
 }

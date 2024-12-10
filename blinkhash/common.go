@@ -49,7 +49,7 @@ type Value64 uint64
 const (
 	EntryNum      = 32
 	PageSize      = 512 // 示例页大小，具体值应根据实际情况调整
-	FillFactor    = 0.8
+	FillFactor    = 1.0
 	BITS_PER_LONG = 64
 	LeafBTreeSize = PageSize
 	LeafHashSize  = 1024 * 256

@@ -65,32 +65,8 @@ func NewLNodeHashWithSibling(sibling NodeInterface, count, level int) *LNodeHash
 	}
 	return newHashNode
 }
-
-// GetCount
-//
-//	@Description: 获得hashnode中的entry条数
-//	@receiver lh
-//	@return int
-func (lh *LNodeHash) GetCount() int {
-	return lh.count
-}
-
-// GetLevel
-//
-//	@Description: 获得hashnode位于的层级
-//	@receiver lh
-//	@return int
-func (lh *LNodeHash) GetLevel() int {
-	return lh.level
-}
-
-// GetLock
-//
-//	@Description: 获得锁
-//	@receiver lh
-//	@return uint64
-func (lh *LNodeHash) GetLock() uint64 {
-	return lh.lock
+func (lh *LNodeHash) GetHighKey() interface{} {
+	return lh.HighKey
 }
 
 // Print
@@ -121,19 +97,6 @@ func (lh *LNodeHash) SanityCheck(_highKey interface{}, first bool) {
 	if sibling != nil {
 		sibling.SanityCheck(_highKey, first)
 	}
-}
-
-func (lh *LNodeHash) WriteUnlock() {
-	// 实现具体方法
-	lh.WriteUnlock()
-}
-
-// WriteUnlockObsolete
-//
-//	@Description: 放开写锁，标记此节点过时
-//	@receiver lh
-func (lh *LNodeHash) WriteUnlockObsolete() {
-	lh.WriteUnlockObsolete()
 }
 
 // TrySplitLock
@@ -639,7 +602,8 @@ func (lh *LNodeHash) Remove(key interface{}, vstart uint64) int {
 //	@param key
 //	@return interface{}
 //	@return bool
-func (lh *LNodeHash) Find(key interface{}) interface{} {
+func (lh *LNodeHash) Find(key interface{}) (interface{}, bool) {
+	var found bool
 	for k := 0; k < HashFuncsNum; k++ {
 		hashKey := h(key, 0, uint64(k))
 
@@ -656,25 +620,24 @@ func (lh *LNodeHash) Find(key interface{}) interface{} {
 
 			if needRestart {
 				lh.Buckets[loc].Unlock()
-				return nil
+				return nil, found
 			}
 			if LINKED && lh.Buckets[loc].state != STABLE {
 				if !lh.Buckets[loc].upgradeLock(bucketVstart) {
 					needRestart = true
-					return nil
+					return nil, found
 				}
 
 				if !lh.StabilizeBucket(int(loc)) {
 					lh.Buckets[loc].Unlock()
 					needRestart = true
-					return nil
+					return nil, found
 				}
 
 				lh.Buckets[loc].Unlock()
 				bucketVstart += 0b100
 			}
 
-			var found bool
 			var ret interface{}
 
 			if FINGERPRINT {
@@ -686,18 +649,18 @@ func (lh *LNodeHash) Find(key interface{}) interface{} {
 			if found {
 				bucketVend, needRestart := lh.Buckets[loc].getVersion()
 				if needRestart || (bucketVstart != bucketVend) {
-					return nil
+					return nil, found
 				}
-				return ret
+				return ret, found
 			}
 
 			bucketVend, needRestart := lh.Buckets[loc].getVersion()
 			if needRestart || (bucketVstart != bucketVend) {
-				return nil
+				return nil, found
 			}
 		}
 	}
-	return nil // 没找到key
+	return nil, found // 没找到key
 }
 
 // RangeLookUp
@@ -1270,4 +1233,8 @@ func (lh *LNodeHash) Convert(version uint64) ([]*LNodeBTree, int, error) {
 	}
 
 	return leaves, num, nil
+}
+
+func (lh *LNodeHash) GetNode() Node {
+	return lh.Node
 }

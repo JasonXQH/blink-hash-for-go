@@ -67,32 +67,21 @@ func NewLNodeBTreeWithSibling(sibling NodeInterface, count, level int) *LNodeBTr
 	}
 }
 
-func (b *LNodeBTree) GetType() NodeType {
-	return BTreeNode
-}
-
 // TODO 实现Node Interface接口：
-func (b *LNodeBTree) GetCount() int {
-	return b.count
-}
 
-func (b *LNodeBTree) GetLevel() int {
-	return b.level
-}
-
-func (b *LNodeBTree) GetLock() uint64 {
-	return b.lock
+func (lb *LNodeBTree) GetHighKey() interface{} {
+	return lb.HighKey
 }
 
 // Print Implement Print 方法 for LNodeBTree
-func (b *LNodeBTree) Print() {
+func (lb *LNodeBTree) Print() {
 	fmt.Printf("LNodeBTree Information:\n")
-	fmt.Printf("Type: %v\n", b.Type)
-	fmt.Printf("HighKey: %v\n", b.HighKey)
-	fmt.Printf("Cardinality: %d\n", b.Cardinality)
-	b.Node.Print()
+	fmt.Printf("Type: %v\n", lb.Type)
+	fmt.Printf("HighKey: %v\n", lb.HighKey)
+	fmt.Printf("Cardinality: %d\n", lb.Cardinality)
+	lb.Node.Print()
 	fmt.Printf("Entries:\n")
-	for i, entry := range b.Entries {
+	for i, entry := range lb.Entries {
 		fmt.Printf("\tEntry %d: Key = %v, Value = %v\n", i, entry.Key, entry.Value)
 	}
 }
@@ -103,39 +92,39 @@ func (b *LNodeBTree) Print() {
 //	@receiver b
 //	@param _highKey
 //	@param first
-func (b *LNodeBTree) SanityCheck(_highKey interface{}, first bool) {
+func (lb *LNodeBTree) SanityCheck(_highKey interface{}, first bool) {
 	fmt.Printf("我是LNodeBTree 调用 SanityCheck:\n")
 	// 检查键值是否有序
-	for i := 0; i < b.count-1; i++ {
-		for j := i + 1; j < b.count; j++ {
-			keyInt, ok := b.Entries[i].Key.(int)
+	for i := 0; i < lb.count-1; i++ {
+		for j := i + 1; j < lb.count; j++ {
+			keyInt, ok := lb.Entries[i].Key.(int)
 			if !ok {
-				fmt.Printf("Error: Entry key is not an int: %v\n", b.Entries[i].Key)
+				fmt.Printf("Error: Entry key is not an int: %v\n", lb.Entries[i].Key)
 				continue
 			}
 
-			highKeyInt, ok := b.HighKey.(int)
+			highKeyInt, ok := lb.HighKey.(int)
 			if !ok {
-				fmt.Printf("Error: HighKey is not an int: %v\n", b.HighKey)
+				fmt.Printf("Error: HighKey is not an int: %v\n", lb.HighKey)
 				continue
 			}
 			if keyInt > highKeyInt { // 假设key是int类型
 				fmt.Printf("lnode_t::key order is not preserved!!\n")
-				fmt.Printf("[%d].key: %v\t[%d].key: %v\n", i, b.Entries[i].Key, j, b.Entries[j].Key)
+				fmt.Printf("[%d].key: %v\t[%d].key: %v\n", i, lb.Entries[i].Key, j, lb.Entries[j].Key)
 			}
 		}
 	}
 
 	// 检查 sibling 和 highKey 的关系
-	for i := 0; i < b.count; i++ {
-		entryKey, ok1 := b.Entries[i].Key.(int)
-		highKeyInt, ok2 := b.HighKey.(int)
+	for i := 0; i < lb.count; i++ {
+		entryKey, ok1 := lb.Entries[i].Key.(int)
+		highKeyInt, ok2 := lb.HighKey.(int)
 		if !ok1 || !ok2 {
 			fmt.Printf("Error: Entry key or HighKey is not int type\n")
 			continue
 		}
-		if b.siblingPtr != nil && entryKey > highKeyInt {
-			fmt.Printf("%d lnode_t:: (%v) is higher than high Key %v\n", i, b.Entries[i].Key, b.HighKey)
+		if lb.siblingPtr != nil && entryKey > highKeyInt {
+			fmt.Printf("%d lnode_t:: (%v) is higher than high Key %v\n", i, lb.Entries[i].Key, lb.HighKey)
 		}
 		if !first {
 			prevHighKeyInt, ok := _highKey.(int)
@@ -143,33 +132,17 @@ func (b *LNodeBTree) SanityCheck(_highKey interface{}, first bool) {
 				fmt.Printf("Error: prevHighKey is not int type\n")
 				continue
 			}
-			if b.siblingPtr != nil && entryKey < prevHighKeyInt {
-				fmt.Printf("lnode_t:: %d (%v) is smaller than previous high Key %v\n", i, b.Entries[i].Key, _highKey)
-				fmt.Printf("--------- node_address %v , current high_Key %v\n", b, b.HighKey)
+			if lb.siblingPtr != nil && entryKey < prevHighKeyInt {
+				fmt.Printf("lnode_t:: %d (%v) is smaller than previous high Key %v\n", i, lb.Entries[i].Key, _highKey)
+				fmt.Printf("--------- node_address %v , current high_Key %v\n", lb, lb.HighKey)
 			}
 		}
 	}
 
-	if b.siblingPtr != nil {
-		sibling := b.siblingPtr
+	if lb.siblingPtr != nil {
+		sibling := lb.siblingPtr
 		sibling.SanityCheck(_highKey, first)
 	}
-}
-
-// WriteUnlock
-//
-//	@Description: 实现基类中的WriteUnlock方法，还是调用Node实现的上锁接口
-//	@receiver b
-func (b *LNodeBTree) WriteUnlock() {
-	b.Node.WriteUnlock()
-}
-
-// WriteUnlockObsolete
-//
-//	@Description: 实现基类中的WriteUnlockObsolete方法
-//	@receiver b
-func (b *LNodeBTree) WriteUnlockObsolete() {
-	b.Node.WriteUnlockObsolete()
 }
 
 // Split
@@ -181,31 +154,31 @@ func (b *LNodeBTree) WriteUnlockObsolete() {
 //	@param version
 //	@return Splittable
 //	@return interface{}
-func (b *LNodeBTree) Split(key interface{}, value interface{}, version uint64) (Splittable, interface{}) {
-	half := len(b.Entries) / 2
+func (lb *LNodeBTree) Split(key interface{}, value interface{}, version uint64) (Splittable, interface{}) {
+	half := len(lb.Entries) / 2
 	if half == 0 {
 		panic("Split: cannot split a node with zero entries")
 	}
-	splitKey := b.Entries[half-1].Key // 确定拆分键
-	newCnt := len(b.Entries) - half
+	splitKey := lb.Entries[half-1].Key // 确定拆分键
+	newCnt := len(lb.Entries) - half
 	// 创建新的兄弟节点
-	newLeaf := NewLNodeBTreeWithSibling(b.siblingPtr, newCnt, b.level)
-	newLeaf.HighKey = b.HighKey
+	newLeaf := NewLNodeBTreeWithSibling(lb.siblingPtr, newCnt, lb.level)
+	newLeaf.HighKey = lb.HighKey
 
 	// 拷贝后半部分到新叶节点
-	copy(newLeaf.Entries, b.Entries[half:half+newCnt])
+	copy(newLeaf.Entries, lb.Entries[half:half+newCnt])
 	newLeaf.count = newCnt
 
 	// 更新当前节点
-	b.siblingPtr = newLeaf
-	b.HighKey = splitKey
-	b.count = half
-	b.Entries = b.Entries[:half]
+	lb.siblingPtr = newLeaf
+	lb.HighKey = splitKey
+	lb.count = half
+	lb.Entries = lb.Entries[:half]
 	// 根据键值确定插入位置
 	if compareIntKeys(splitKey, key) < 0 {
 		newLeaf.InsertAfterSplit(key, value)
 	} else {
-		b.InsertAfterSplit(key, value)
+		lb.InsertAfterSplit(key, value)
 	}
 	siblingPtr := newLeaf.siblingPtr
 	if hashNode, ok := siblingPtr.(*LNodeHash); ok {
@@ -216,17 +189,17 @@ func (b *LNodeBTree) Split(key interface{}, value interface{}, version uint64) (
 	return newLeaf, splitKey
 }
 
-func (b *LNodeBTree) InsertAfterSplit(key, value interface{}) {
-	pos := b.FindLowerBound(key)
+func (lb *LNodeBTree) InsertAfterSplit(key, value interface{}) {
+	pos := lb.FindLowerBound(key)
 
 	// 将元素向后移动，为新元素腾出位置
 	// 在 Go 中，我们可以使用切片和 append 函数来处理这个问题
-	b.Entries = append(b.Entries, Entry{})
-	copy(b.Entries[pos+1:], b.Entries[pos:len(b.Entries)-1]) // 复制 pos 位置后的切片
+	lb.Entries = append(lb.Entries, Entry{})
+	copy(lb.Entries[pos+1:], lb.Entries[pos:len(lb.Entries)-1]) // 复制 pos 位置后的切片
 	// 在找到的位置插入新的键值对
-	b.Entries[pos] = Entry{Key: key, Value: value}
+	lb.Entries[pos] = Entry{Key: key, Value: value}
 	// 更新元素计数
-	b.count++
+	lb.count++
 }
 
 // Insert
@@ -237,8 +210,8 @@ func (b *LNodeBTree) InsertAfterSplit(key, value interface{}) {
 //	@param value
 //	@param version
 //	@return int
-func (b *LNodeBTree) Insert(key interface{}, value interface{}, version uint64) int {
-	success, needRestart := b.TryUpgradeWriteLock(version)
+func (lb *LNodeBTree) Insert(key interface{}, value interface{}, version uint64) int {
+	success, needRestart := lb.TryUpgradeWriteLock(version)
 	if needRestart {
 		// 如果需要重启，按照 C++ 代码的逻辑返回 -1
 		return NeedRestart
@@ -248,27 +221,27 @@ func (b *LNodeBTree) Insert(key interface{}, value interface{}, version uint64) 
 		return NeedRestart
 	}
 	// 检查是否有足够空间进行插入
-	if len(b.Entries) >= b.Cardinality {
-		b.WriteUnlock()  // 释放写锁
+	if len(lb.Entries) >= lb.Cardinality {
+		lb.WriteUnlock() // 释放写锁
 		return NeedSplit // 表示需要分裂
 	}
 	// 执行插入逻辑
-	pos := b.FindLowerBound(key)
+	pos := lb.FindLowerBound(key)
 	// 边界保护
 	if pos < 0 {
 		pos = 0
 	}
-	if pos > len(b.Entries) {
-		pos = len(b.Entries)
+	if pos > len(lb.Entries) {
+		pos = len(lb.Entries)
 	}
 
 	// 使用Go的切片操作来插入数据
-	b.Entries = append(b.Entries, Entry{}) // 扩展切片以防止越界
-	copy(b.Entries[pos+1:], b.Entries[pos:])
-	b.Entries[pos] = Entry{Key: key, Value: value}
+	lb.Entries = append(lb.Entries, Entry{}) // 扩展切片以防止越界
+	copy(lb.Entries[pos+1:], lb.Entries[pos:])
+	lb.Entries[pos] = Entry{Key: key, Value: value}
 	// 更新计数
-	b.count++
-	b.WriteUnlock() // 插入完成后释放写锁
+	lb.count++
+	lb.WriteUnlock() // 插入完成后释放写锁
 	return InsertSuccess
 }
 
@@ -280,16 +253,16 @@ func (b *LNodeBTree) Insert(key interface{}, value interface{}, version uint64) 
 //	@param value
 //	@param version
 //	@return int
-func (b *LNodeBTree) Update(key interface{}, value interface{}, version uint64) int {
-	needRestart, _ := b.Node.TryUpgradeWriteLock(version)
+func (lb *LNodeBTree) Update(key interface{}, value interface{}, version uint64) int {
+	needRestart, _ := lb.Node.TryUpgradeWriteLock(version)
 	if needRestart {
 		return NeedRestart
 	}
 
 	// Perform update_linear
-	updated := b.updateLinear(key, value)
+	updated := lb.updateLinear(key, value)
 
-	b.WriteUnlock()
+	lb.WriteUnlock()
 
 	if updated {
 		return UpdateSuccess
@@ -299,10 +272,10 @@ func (b *LNodeBTree) Update(key interface{}, value interface{}, version uint64) 
 }
 
 // updateLinear searches for the key and updates the value if found
-func (b *LNodeBTree) updateLinear(key interface{}, value interface{}) bool {
-	for i, entry := range b.Entries {
+func (lb *LNodeBTree) updateLinear(key interface{}, value interface{}) bool {
+	for i, entry := range lb.Entries {
 		if compareIntKeys(entry.Key, key) == 0 {
-			b.Entries[i].Value = value
+			lb.Entries[i].Value = value
 			return true
 		}
 	}
@@ -316,33 +289,33 @@ func (b *LNodeBTree) updateLinear(key interface{}, value interface{}) bool {
 //	@param key
 //	@param version
 //	@return int
-func (b *LNodeBTree) Remove(key interface{}, version uint64) int {
-	needRestart, _ := b.TryUpgradeWriteLock(version)
+func (lb *LNodeBTree) Remove(key interface{}, version uint64) int {
+	needRestart, _ := lb.TryUpgradeWriteLock(version)
 	if needRestart {
 		return NeedRestart
 	}
 
-	if b.count > 0 {
-		pos := b.findPosLinear(key)
+	if lb.count > 0 {
+		pos := lb.findPosLinear(key)
 		if pos == -1 {
-			b.WriteUnlock()
+			lb.WriteUnlock()
 			return KeyNotFound // Key not found
 		}
 		// Remove the entry at pos by shifting
-		b.Entries = append(b.Entries[:pos], b.Entries[pos+1:]...)
-		b.count--
+		lb.Entries = append(lb.Entries[:pos], lb.Entries[pos+1:]...)
+		lb.count--
 
-		b.WriteUnlock()
+		lb.WriteUnlock()
 		return RemoveSuccess
 	}
 
-	b.WriteUnlock()
+	lb.WriteUnlock()
 	return KeyNotFound
 }
 
 // findPosLinear finds the position of the key in Entries
-func (b *LNodeBTree) findPosLinear(key interface{}) int {
-	for i, entry := range b.Entries {
+func (lb *LNodeBTree) findPosLinear(key interface{}) int {
+	for i, entry := range lb.Entries {
 		if compareIntKeys(entry.Key, key) == 0 {
 			return i
 		}
@@ -360,11 +333,11 @@ func (b *LNodeBTree) findPosLinear(key interface{}) int {
 //	@param searchRange
 //	@param continued
 //	@return int
-func (b *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int, searchRange int, continued bool) int {
+func (lb *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int, searchRange int, continued bool) int {
 	currentCount := count // 使用一个单独的变量跟踪填充数量
 	if continued {
-		for i := 0; i < b.count; i++ {
-			*buf = append(*buf, b.Entries[i].Value)
+		for i := 0; i < lb.count; i++ {
+			*buf = append(*buf, lb.Entries[i].Value)
 			currentCount++
 			if currentCount == searchRange {
 				return currentCount
@@ -372,10 +345,10 @@ func (b *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int,
 		}
 		return currentCount
 	} else {
-		pos := b.FindLowerBound(key)
+		pos := lb.FindLowerBound(key)
 		// 从 pos 开始，注意 pos + 1 是否合理，取决于具体需求
-		for i := pos + 1; i < b.count; i++ {
-			*buf = append(*buf, b.Entries[i].Value)
+		for i := pos + 1; i < lb.count; i++ {
+			*buf = append(*buf, lb.Entries[i].Value)
 			currentCount++
 			if currentCount == searchRange {
 				return currentCount
@@ -392,13 +365,13 @@ func (b *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int,
 //	@param key
 //	@return interface{}
 //	@return bool
-func (b *LNodeBTree) Find(key interface{}) (interface{}, bool) {
+func (lb *LNodeBTree) Find(key interface{}) (interface{}, bool) {
 	//TODO implement me
 	// 假设 LEAF_BTREE_SIZE 是一个全局常量
 	if LeafHashSize < 2048 {
-		return b.findLinear(key)
+		return lb.findLinear(key)
 	} else {
-		return b.findBinary(key)
+		return lb.findBinary(key)
 	}
 }
 
@@ -407,9 +380,9 @@ func (b *LNodeBTree) Find(key interface{}) (interface{}, bool) {
 //	@Description: 实现Utilizer接口
 //	@receiver b
 //	@return float64
-func (b *LNodeBTree) Utilization() float64 {
+func (lb *LNodeBTree) Utilization() float64 {
 	// 返回B树节点的利用率计算
-	return float64(len(b.Entries)) / float64(b.Cardinality)
+	return float64(len(lb.Entries)) / float64(lb.Cardinality)
 }
 
 // lowerboundLinear
@@ -418,12 +391,12 @@ func (b *LNodeBTree) Utilization() float64 {
 //	@receiver b
 //	@param key
 //	@return int
-func (b *LNodeBTree) lowerboundLinear(key interface{}) int {
+func (lb *LNodeBTree) lowerboundLinear(key interface{}) int {
 	keyInt, ok := key.(int)
 	if !ok {
 		panic("FindLowerBoundLinear: key is not of type int")
 	}
-	for i, entry := range b.Entries {
+	for i, entry := range lb.Entries {
 		entryKey, ok := entry.Key.(int)
 		if !ok {
 			continue
@@ -432,7 +405,7 @@ func (b *LNodeBTree) lowerboundLinear(key interface{}) int {
 			return i
 		}
 	}
-	return len(b.Entries) // 插入到末尾
+	return len(lb.Entries) // 插入到末尾
 }
 
 // lowerboundBinary
@@ -441,14 +414,14 @@ func (b *LNodeBTree) lowerboundLinear(key interface{}) int {
 //	@receiver b
 //	@param key
 //	@return int
-func (b *LNodeBTree) lowerboundBinary(key interface{}) int {
+func (lb *LNodeBTree) lowerboundBinary(key interface{}) int {
 	lower := 0
-	upper := len(b.Entries)
+	upper := len(lb.Entries)
 	for lower < upper {
 		mid := (upper-lower)/2 + lower
-		if key.(int) < b.Entries[mid].Key.(int) {
+		if key.(int) < lb.Entries[mid].Key.(int) {
 			upper = mid
-		} else if key.(int) > b.Entries[mid].Key.(int) {
+		} else if key.(int) > lb.Entries[mid].Key.(int) {
 			lower = mid + 1
 		} else {
 			return mid
@@ -463,34 +436,34 @@ func (b *LNodeBTree) lowerboundBinary(key interface{}) int {
 //	@receiver b
 //	@param key
 //	@return int
-func (b *LNodeBTree) FindLowerBound(key interface{}) int {
+func (lb *LNodeBTree) FindLowerBound(key interface{}) int {
 	if LeafBTreeSize < 2048 {
-		return b.lowerboundLinear(key)
+		return lb.lowerboundLinear(key)
 	} else {
-		return b.lowerboundBinary(key)
+		return lb.lowerboundBinary(key)
 	}
 }
 
-func (b *LNodeBTree) findLinear(key interface{}) (interface{}, bool) {
-	for i := 0; i < len(b.Entries); i++ {
-		if key == b.Entries[i].Key {
-			return b.Entries[i].Value, true
+func (lb *LNodeBTree) findLinear(key interface{}) (interface{}, bool) {
+	for i := 0; i < len(lb.Entries); i++ {
+		if key == lb.Entries[i].Key {
+			return lb.Entries[i].Value, true
 		}
 	}
 	return nil, false // 代替 C++ 中的返回 0，更符合 Go 的惯例
 }
 
-func (b *LNodeBTree) findBinary(key interface{}) (interface{}, bool) {
+func (lb *LNodeBTree) findBinary(key interface{}) (interface{}, bool) {
 	lower := 0
-	upper := len(b.Entries)
+	upper := len(lb.Entries)
 	for lower < upper {
 		mid := (upper-lower)/2 + lower
-		if compareIntKeys(key, b.Entries[mid].Key) < 0 {
+		if compareIntKeys(key, lb.Entries[mid].Key) < 0 {
 			upper = mid
-		} else if compareIntKeys(key, b.Entries[mid].Key) > 0 {
+		} else if compareIntKeys(key, lb.Entries[mid].Key) > 0 {
 			lower = mid + 1
 		} else {
-			return b.Entries[mid].Value, true
+			return lb.Entries[mid].Value, true
 		}
 	}
 	return nil, false // 代替 C++ 中的返回 0
@@ -504,27 +477,31 @@ func (b *LNodeBTree) findBinary(key interface{}) (interface{}, bool) {
 //	@param batchSize
 //	@param from
 //	@param to
-func (b *LNodeBTree) batchInsert(buf []Entry, batchSize int, from *int, to int) {
+func (lb *LNodeBTree) batchInsert(buf []Entry, batchSize int, from *int, to int) {
 	// 如果 from + batch_size < to，则拷贝 batch_size 个条目
 	if *from+batchSize < to {
-		b.Entries = append(b.Entries, buf[*from:*from+batchSize]...)
+		lb.Entries = append(lb.Entries, buf[*from:*from+batchSize]...)
 		*from += batchSize
-		b.count += batchSize
+		lb.count += batchSize
 	} else {
 		// 否则只拷贝 (to - from) 个条目
-		b.Entries = append(b.Entries, buf[*from:to]...)
-		b.count += (to - *from)
+		lb.Entries = append(lb.Entries, buf[*from:to]...)
+		lb.count += (to - *from)
 		*from = to
 	}
 	// 更新 HighKey
-	b.HighKey = b.Entries[b.count-1].Key
+	lb.HighKey = lb.Entries[lb.count-1].Key
 }
 
 // BatchInsert 批量插入条目到 B-tree 节点
-func (b *LNodeBTree) BatchInsert(entries []Entry) {
-	b.Entries = append(b.Entries, entries...)
-	b.count += len(entries)
-	if b.count > 0 {
-		b.HighKey = b.Entries[b.count-1].Key
+func (lb *LNodeBTree) BatchInsert(entries []Entry) {
+	lb.Entries = append(lb.Entries, entries...)
+	lb.count += len(entries)
+	if lb.count > 0 {
+		lb.HighKey = lb.Entries[lb.count-1].Key
 	}
+}
+
+func (lb *LNodeBTree) GetNode() Node {
+	return lb.Node
 }

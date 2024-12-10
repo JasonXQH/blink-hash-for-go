@@ -40,7 +40,14 @@ func (m *MockNode) Hash(hv uint64) uint64 {
 
 // TestINode_Insert 测试单条插入
 func TestINode_Insert(t *testing.T) {
-	inode := NewINodeForInsertInBatch(1)
+
+	inode := INode{
+		Node: Node{
+			level: 1,
+		},
+		Cardinality: 4,
+		Entries:     make([]Entry, 0, 4), // 初始化为空但有容量
+	}
 
 	newNode1 := NewNode(1)
 	// 插入第一条
@@ -123,52 +130,154 @@ func TestINode_Split(t *testing.T) {
 
 // TestINode_BatchInsert 测试批量插入
 func TestINode_BatchInsert(t *testing.T) {
-	inode := NewINodeForInsertInBatch(1)
-	keys := []interface{}{10, 20, 30}
-	values := []*Node{NewNode(1), NewNode(2), NewNode(3)}
-	num := 3
-
-	newNodes, err := inode.BatchInsert(keys, values, num)
-	if err != nil {
-		t.Fatalf("BatchInsert failed: %v", err)
-	}
-	if newNodes != nil {
-		t.Errorf("Expected no new nodes, got %v", newNodes)
-	}
-	if inode.count != 3 {
-		t.Errorf("Expected count to be 3, got %d", inode.count)
-	}
-	if inode.HighKey != 30 {
-		t.Errorf("Expected HighKey to be 30, got %v", inode.HighKey)
-	}
-	for i, key := range keys {
-		if inode.Entries[i].Key != key {
-			t.Errorf("Expected Entries[%d].Key to be %v, got %v", i, key, inode.Entries[i].Key)
+	t.Run("TEST Case 1，insert inode", func(t *testing.T) {
+		inode := INode{
+			Node: Node{
+				level: 1,
+			},
+			Cardinality: 5,
+			Entries:     make([]Entry, 0, 5), // 初始化为空但有容量
 		}
-		if inode.Entries[i].Value != values[i] {
-			t.Errorf("Expected Entries[%d].Value to be node %d, got %v", i, i+1, inode.Entries[i].Value)
+		keys := []interface{}{10, 20}
+		values := []*Node{NewNode(1), NewNode(2)}
+		num := 2
+
+		newNodes, err := inode.BatchInsert(keys, values, num)
+		if err != nil {
+			t.Fatalf("BatchInsert failed: %v", err)
 		}
-	}
+		if newNodes != nil {
+			t.Errorf("Expected no new nodes, got %v", newNodes)
+		}
+		if inode.count != 2 {
+			t.Errorf("Expected count to be 3, got %d", inode.count)
+		}
+		if inode.HighKey != 20 {
+			t.Errorf("Expected HighKey to be 30, got %v", inode.HighKey)
+		}
+		for i, key := range keys {
+			if inode.Entries[i].Key != key {
+				t.Errorf("Expected Entries[%d].Key to be %v, got %v", i, key, inode.Entries[i].Key)
+			}
+			if inode.Entries[i].Value != values[i] {
+				t.Errorf("Expected Entries[%d].Value to be node %d, got %v", i, i+1, inode.Entries[i].Value)
+			}
+		}
+		//继续插入，节点不会分裂
+		batch2Keys := []interface{}{15, 17}
+		batch2Values := []*Node{NewNode(15), NewNode(17)}
+		batch2Num := 2
 
-	// 批量插入导致节点分裂
-	keysSplit := []interface{}{40, 50}
-	valuesSplit := []*Node{NewNode(4), NewNode(5)}
-	numSplit := 2
+		newNodes, err = inode.BatchInsert(batch2Keys, batch2Values, batch2Num)
+		if err != nil {
+			t.Fatalf("BatchInsert failed: %v", err)
+		}
+		if newNodes != nil || len(newNodes) != 0 {
+			t.Errorf("Expected insert in-place, got %v", newNodes)
+		}
+		if inode.count != 4 { // adjust based on BatchInsert logic
+			t.Errorf("Expected new node count to be 4, got %d", inode.count)
+		}
+	})
+	t.Run("TEST Case 2， Insertion Causing Split with Migration and Movement", func(t *testing.T) {
+		inode := INode{
+			Node: Node{
+				level: 1,
+			},
+			Cardinality: 5,
+			Entries:     make([]Entry, 0, 5), // 初始化为空但有容量
+		}
+		keys := []interface{}{10, 15, 17, 20}
+		values := []*Node{NewNode(10), NewNode(15), NewNode(17), NewNode(20)}
+		num := 4
 
-	newNodes, err = inode.BatchInsert(keysSplit, valuesSplit, numSplit)
-	if err != nil {
-		t.Fatalf("BatchInsert failed: %v", err)
-	}
-	if newNodes == nil || len(newNodes) == 0 {
-		t.Errorf("Expected new nodes after split, got %v", newNodes)
-	}
-	if inode.count != 2 { // assuming split occurs after count=4, adjust according to cardinality
-		t.Errorf("Expected original node count to be 2 after split, got %d", inode.count)
-	}
-	if newNodes[0].count != 3 { // adjust based on BatchInsert logic
-		t.Errorf("Expected new node count to be 3, got %d", newNodes[0].count)
-	}
-	// Further assertions can be added based on the exact split logic
+		newNodes, err := inode.BatchInsert(keys, values, num)
+		if err != nil {
+			t.Fatalf("BatchInsert failed: %v", err)
+		}
+		if newNodes != nil {
+			t.Errorf("Expected no new nodes, got %v", newNodes)
+		}
+		if inode.count != 4 {
+			t.Errorf("Expected count to be 3, got %d", inode.count)
+		}
+		if inode.HighKey != 20 {
+			t.Errorf("Expected HighKey to be 30, got %v", inode.HighKey)
+		}
+		for i, key := range keys {
+			if inode.Entries[i].Key != key {
+				t.Errorf("Expected Entries[%d].Key to be %v, got %v", i, key, inode.Entries[i].Key)
+			}
+			if inode.Entries[i].Value != values[i] {
+				t.Errorf("Expected Entries[%d].Value to be node %d, got %v", i, i+1, inode.Entries[i].Value)
+			}
+		}
+		//继续插入，节点会分裂
+		batch2Keys := []interface{}{12, 18}
+		batch2Values := []*Node{NewNode(12), NewNode(18)}
+		batch2Num := 2
+
+		newNodes, err = inode.BatchInsert(batch2Keys, batch2Values, batch2Num)
+		if err != nil {
+			t.Fatalf("BatchInsert failed: %v", err)
+		}
+		if newNodes != nil || len(newNodes) != 0 {
+			t.Errorf("Expected insert in-place, got %v", newNodes)
+		}
+		if inode.count != 4 { // adjust based on BatchInsert logic
+			t.Errorf("Expected new node count to be 4, got %d", inode.count)
+		}
+	})
+
+	t.Run("TEST Case 2， Insertion Causing Split with Migration and Movement", func(t *testing.T) {
+		inode := INode{
+			Node: Node{
+				level: 1,
+			},
+			Cardinality: 5,
+			Entries:     make([]Entry, 0, 5), // 初始化为空但有容量
+		}
+		keys := []interface{}{10, 15, 20}
+		values := []*Node{NewNode(10), NewNode(15), NewNode(20)}
+		num := 3
+
+		newNodes, err := inode.BatchInsert(keys, values, num)
+		if err != nil {
+			t.Fatalf("BatchInsert failed: %v", err)
+		}
+		if newNodes != nil {
+			t.Errorf("Expected no new nodes, got %v", newNodes)
+		}
+		if inode.count != 3 {
+			t.Errorf("Expected count to be 3, got %d", inode.count)
+		}
+		if inode.HighKey != 20 {
+			t.Errorf("Expected HighKey to be 30, got %v", inode.HighKey)
+		}
+		for i, key := range keys {
+			if inode.Entries[i].Key != key {
+				t.Errorf("Expected Entries[%d].Key to be %v, got %v", i, key, inode.Entries[i].Key)
+			}
+			if inode.Entries[i].Value != values[i] {
+				t.Errorf("Expected Entries[%d].Value to be node %d, got %v", i, i+1, inode.Entries[i].Value)
+			}
+		}
+		//继续插入，节点会分裂
+		batch2Keys := []interface{}{12, 18}
+		batch2Values := []*Node{NewNode(12), NewNode(18)}
+		batch2Num := 2
+
+		newNodes, err = inode.BatchInsert(batch2Keys, batch2Values, batch2Num)
+		if err != nil {
+			t.Fatalf("BatchInsert failed: %v", err)
+		}
+		if newNodes != nil || len(newNodes) != 0 {
+			t.Errorf("Expected insert in-place, got %v", newNodes)
+		}
+		if inode.count != 4 { // adjust based on BatchInsert logic
+			t.Errorf("Expected new node count to be 4, got %d", inode.count)
+		}
+	})
 }
 
 // TestINode_BatchMigrate 测试批量迁移

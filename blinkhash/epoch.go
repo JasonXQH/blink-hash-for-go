@@ -24,17 +24,6 @@ type DeletionList struct {
 	Added             uint64
 }
 
-type Epoche struct {
-	CurrentEpoche    uint64
-	DeletionLists    sync.Map // thread-specific storage
-	StartGCThreshold int
-}
-
-type ThreadInfo struct {
-	Epoche       *Epoche
-	DeletionList *DeletionList
-}
-
 func NewDeletionList() *DeletionList {
 	return &DeletionList{}
 }
@@ -70,7 +59,10 @@ func (d *DeletionList) Add(n unsafe.Pointer, globalEpoch uint64) {
 	d.Added++
 }
 
-func (d *DeletionList) Remove(label, prev *LabelDelete) {
+func (d *DeletionList) Remove(label, prev *LabelDelete) error {
+	if label == nil {
+		return fmt.Errorf("label is nil")
+	}
 	if prev == nil {
 		d.HeadDeletionList = label.Next
 	} else {
@@ -81,26 +73,65 @@ func (d *DeletionList) Remove(label, prev *LabelDelete) {
 	label.Next = d.FreeLabelDeletes
 	d.FreeLabelDeletes = label
 	d.Deleted += uint64(label.NodesCount)
+	return nil
 }
 
-func NewThreadInfo(epoche *Epoche) *ThreadInfo {
-	return &ThreadInfo{
-		Epoche:       epoche,
-		DeletionList: NewDeletionList(),
+//-------------------------------------------
+// Epoche 和ThreadInfo
+//-------------------------------------------
+
+type Epoche struct {
+	CurrentEpoche    uint64
+	DeletionLists    sync.Map // thread-specific storage
+	StartGCThreshold int
+}
+
+type ThreadInfo struct {
+	Epoche       *Epoche
+	DeletionList *DeletionList
+}
+
+// NewEpoche creates a new Epoche instance with the specified StartGCThreshold.
+func NewEpoche(startGCThreshold int) *Epoche {
+	return &Epoche{
+		CurrentEpoche:    0,
+		DeletionLists:    sync.Map{},
+		StartGCThreshold: startGCThreshold,
 	}
 }
 
+func NewThreadInfo(epoche *Epoche) *ThreadInfo {
+	dl := NewDeletionList()
+	ti := &ThreadInfo{
+		Epoche:       epoche,
+		DeletionList: dl,
+	}
+	epoche.DeletionLists.Store(ti, dl)
+	return ti
+}
+
+func (ti *ThreadInfo) GetDeletionList() *DeletionList {
+	return ti.DeletionList
+}
+
+func (ti *ThreadInfo) GetEpoche() *Epoche {
+	return ti.Epoche
+}
+
+// EnterEpoche marks the beginning of an epoch for the thread.
 func (e *Epoche) EnterEpoche(ti *ThreadInfo) {
 	curEpoche := atomic.LoadUint64(&e.CurrentEpoche)
 	atomic.StoreUint64(&ti.DeletionList.LocalEpoche, curEpoche)
 }
 
+// MarkNodeForDeletion marks a node for deletion.
 func (e *Epoche) MarkNodeForDeletion(n unsafe.Pointer, ti *ThreadInfo) {
 	currentEpoche := atomic.LoadUint64(&e.CurrentEpoche)
 	ti.DeletionList.Add(n, currentEpoche)
 	ti.DeletionList.ThresholdCounter++
 }
 
+// ExitEpocheAndCleanup marks the end of an epoch and performs cleanup if necessary.
 func (e *Epoche) ExitEpocheAndCleanup(ti *ThreadInfo) {
 	dl := ti.DeletionList
 	if dl.ThresholdCounter&(64-1) == 1 {
@@ -112,11 +143,13 @@ func (e *Epoche) ExitEpocheAndCleanup(ti *ThreadInfo) {
 			return
 		}
 
+		// Set localEpoche to max to indicate no active epoch.
 		atomic.StoreUint64(&dl.LocalEpoche, ^uint64(0)) // max uint64
 
 		var oldestEpoche uint64 = ^uint64(0)
-		e.DeletionLists.Range(func(_, value interface{}) bool {
-			localEpoche := value.(*DeletionList).LocalEpoche
+		e.DeletionLists.Range(func(key, value interface{}) bool {
+			dl := value.(*DeletionList)
+			localEpoche := atomic.LoadUint64(&dl.LocalEpoche)
 			if localEpoche < oldestEpoche {
 				oldestEpoche = localEpoche
 			}
@@ -126,6 +159,8 @@ func (e *Epoche) ExitEpocheAndCleanup(ti *ThreadInfo) {
 		var prev *LabelDelete
 		for cur := dl.Head(); cur != nil; cur = cur.Next {
 			if cur.Epoche < oldestEpoche {
+				// In Go, memory is managed by GC, so no need to manually delete nodes.
+				// However, if you have custom memory management, handle it here.
 				dl.Remove(cur, prev)
 			} else {
 				prev = cur
@@ -135,40 +170,80 @@ func (e *Epoche) ExitEpocheAndCleanup(ti *ThreadInfo) {
 	}
 }
 
+// ShowDeleteRatio displays the ratio of deleted to added nodes.
 func (e *Epoche) ShowDeleteRatio() {
-	e.DeletionLists.Range(func(_, value interface{}) bool {
+	e.DeletionLists.Range(func(key, value interface{}) bool {
 		dl := value.(*DeletionList)
 		fmt.Printf("Deleted %d of %d\n", dl.Deleted, dl.Added)
 		return true
 	})
 }
 
+// Cleanup performs a global cleanup of all deletion lists.
 func (e *Epoche) Cleanup() {
 	var oldestEpoche uint64 = ^uint64(0)
-	e.DeletionLists.Range(func(_, value interface{}) bool {
-		localEpoche := value.(*DeletionList).LocalEpoche
+	e.DeletionLists.Range(func(key, value interface{}) bool {
+		dl := value.(*DeletionList)
+		localEpoche := atomic.LoadUint64(&dl.LocalEpoche)
 		if localEpoche < oldestEpoche {
 			oldestEpoche = localEpoche
 		}
 		return true
 	})
 
-	e.DeletionLists.Range(func(_, value interface{}) bool {
+	e.DeletionLists.Range(func(key, value interface{}) bool {
 		dl := value.(*DeletionList)
 		var prev *LabelDelete
 		for cur := dl.Head(); cur != nil; {
 			next := cur.Next
-			dl.Remove(cur, prev)
+			if cur.Epoche < oldestEpoche {
+				// In Go, memory is managed by GC, so no need to manually delete nodes.
+				// However, if nodes require custom cleanup, handle here.
+				dl.Remove(cur, prev)
+			} else {
+				prev = cur
+			}
 			cur = next
 		}
 		return true
 	})
 }
 
-func (ti *ThreadInfo) GetDeletionList() *DeletionList {
-	return ti.DeletionList
+//-------------------------------------------
+// EpocheGuard 和 EpocheGuardReadOnly
+//-------------------------------------------
+
+// EpocheGuard manages the epoch lifecycle for a thread (read-write operations).
+type EpocheGuard struct {
+	ti *ThreadInfo
 }
 
-func (ti *ThreadInfo) GetEpoche() *Epoche {
-	return ti.Epoche
+// NewEpocheGuard creates a new EpocheGuard instance.
+// It should be used with defer to ensure Release is called.
+func NewEpocheGuard(ti *ThreadInfo) *EpocheGuard {
+	ti.Epoche.EnterEpoche(ti)
+	return &EpocheGuard{ti: ti}
+}
+
+// Release exits the epoch and performs cleanup.
+func (eg *EpocheGuard) Release() {
+	eg.ti.Epoche.ExitEpocheAndCleanup(eg.ti)
+}
+
+// EpocheGuardReadonly manages the epoch lifecycle for a thread (read-only operations).
+type EpocheGuardReadonly struct {
+	ti *ThreadInfo
+}
+
+// NewEpocheGuardReadonly creates a new EpocheGuardReadonly instance.
+// It should be used with defer to ensure Release is called.
+func NewEpocheGuardReadonly(ti *ThreadInfo) *EpocheGuardReadonly {
+	ti.Epoche.EnterEpoche(ti)
+	return &EpocheGuardReadonly{ti: ti}
+}
+
+// Release exits the epoch without performing cleanup.
+func (eg *EpocheGuardReadonly) Release() {
+	// No cleanup required for read-only operations.
+	// If needed, you can implement specific logic here.
 }

@@ -15,6 +15,10 @@ type Node struct {
 	level       int
 }
 
+func (n *Node) GetSiblingPtr() NodeInterface { return n.siblingPtr }
+
+func (n *Node) GetLeftmostPtr() NodeInterface { return n.leftmostPtr }
+
 func (n *Node) GetType() NodeType {
 	return BASENode
 }
@@ -30,6 +34,8 @@ func (n *Node) GetLevel() int {
 func (n *Node) GetLock() uint64 {
 	return n.lock
 }
+
+func (n *Node) GetHighKey() interface{} { return nil }
 
 // Print 函数打印 Node 信息
 func (n *Node) Print() {

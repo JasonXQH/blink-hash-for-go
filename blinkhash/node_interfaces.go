@@ -9,8 +9,24 @@ type NodeInterface interface {
 	Print()
 	WriteUnlock()
 	WriteUnlockObsolete()
+	TryReadLock() (uint64, bool)
+	GetVersion() (uint64, bool)
+	GetSiblingPtr() NodeInterface
+	GetLeftmostPtr() NodeInterface
+	GetHighKey() interface{}
 	SanityCheck(prevHighKey interface{}, first bool)
-	//GetType() NodeType
+}
+
+type LeafNodeInterface interface {
+	NodeInterface
+	Insertable
+	Splittable
+	Updatable
+	Removable
+	Finder
+	RangeLookuper
+	Utilizer
+	NodeGetter
 }
 
 // Insertable 接口定义插入方法
@@ -46,4 +62,8 @@ type RangeLookuper interface {
 // Utilizer 接口定义利用率方法
 type Utilizer interface {
 	Utilization() float64
+}
+
+type NodeGetter interface {
+	GetNode() Node
 }

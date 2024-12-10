@@ -604,7 +604,7 @@ func TestLNodeHash_Find(t *testing.T) {
 
 		// 测试查找已存在的键
 		for i, k := range keys {
-			val := lnHash.Find(k)
+			val, _ := lnHash.Find(k)
 			if val == nil {
 				t.Errorf("Expected to find key %d, but got nil", k)
 			} else if val != values[i] {
@@ -614,7 +614,7 @@ func TestLNodeHash_Find(t *testing.T) {
 
 		// 测试查找不存在的键
 		nonExistKey := 999
-		val := lnHash.Find(nonExistKey)
+		val, _ := lnHash.Find(nonExistKey)
 		if val != nil {
 			t.Errorf("Expected nil for non-existent key %d, got %v", nonExistKey, val)
 		}
@@ -665,7 +665,7 @@ func TestLNodeHash_Find(t *testing.T) {
 
 		// 测试查找已存在的键
 		for i, k := range keys {
-			val := lnHash.Find(k)
+			val, _ := lnHash.Find(k)
 			if val == nil {
 				t.Errorf("Expected to find key %d, but got nil", k)
 			} else if val != values[i] {
@@ -675,7 +675,7 @@ func TestLNodeHash_Find(t *testing.T) {
 
 		// 测试查找不存在的键
 		nonExistKey := 999
-		val := lnHash.Find(nonExistKey)
+		val, _ := lnHash.Find(nonExistKey)
 		if val != nil {
 			t.Errorf("Expected nil for non-existent key %d, got %v", nonExistKey, val)
 		}
