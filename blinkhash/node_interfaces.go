@@ -15,6 +15,7 @@ type NodeInterface interface {
 	GetLeftmostPtr() NodeInterface
 	GetHighKey() interface{}
 	SanityCheck(prevHighKey interface{}, first bool)
+	GetType() NodeType
 }
 
 type LeafNodeInterface interface {
@@ -27,6 +28,7 @@ type LeafNodeInterface interface {
 	RangeLookuper
 	Utilizer
 	NodeGetter
+	FootPrinter
 }
 
 // Insertable 接口定义插入方法
@@ -66,4 +68,8 @@ type Utilizer interface {
 
 type NodeGetter interface {
 	GetNode() Node
+}
+
+type FootPrinter interface {
+	Footprint(metrics *FootprintMetrics)
 }

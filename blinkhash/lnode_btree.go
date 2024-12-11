@@ -502,6 +502,20 @@ func (lb *LNodeBTree) BatchInsert(entries []Entry) {
 	}
 }
 
+// Footprint 计算B树叶子节点的内存占用。
+func (lb *LNodeBTree) Footprint(metrics *FootprintMetrics) {
+	// 实现具体的内存占用计算逻辑
+	cnt := lb.count
+	invalidNum := lb.Cardinality - cnt
+	metrics.KeyDataOccupied += uint64(unsafe.Sizeof(Entry{})) * uint64(cnt)
+	metrics.KeyDataUnoccupied += uint64(unsafe.Sizeof(Entry{})) * uint64(invalidNum)
+
+}
+
 func (lb *LNodeBTree) GetNode() Node {
 	return lb.Node
+}
+
+func (lb *LNodeBTree) GetType() NodeType {
+	return BTreeNode
 }

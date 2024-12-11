@@ -1238,3 +1238,18 @@ func (lh *LNodeHash) Convert(version uint64) ([]*LNodeBTree, int, error) {
 func (lh *LNodeHash) GetNode() Node {
 	return lh.Node
 }
+
+func (lh *LNodeHash) GetType() NodeType {
+	return HashNode
+}
+
+// Footprint 计算哈希叶子节点的内存占用。
+func (lh *LNodeHash) Footprint(metrics *FootprintMetrics) {
+	// 实现具体的内存占用计算逻辑
+	// 示例：
+	metrics.StructuralDataOccupied += uint64(unsafe.Sizeof(*lh))
+	// 根据需求调整
+	for i := 0; i < lh.Cardinality; i++ {
+		lh.Buckets[i].Footprint(metrics)
+	}
+}

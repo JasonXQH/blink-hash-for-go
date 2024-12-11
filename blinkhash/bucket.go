@@ -257,13 +257,13 @@ func (b *Bucket) CollectAllKeysWithFingerprint(empty uint8) []interface{} {
 }
 
 // Footprint calculates the memory usage of keys and fingerprints.
-func (b *Bucket) Footprint() (meta, structuralDataOccupied, structuralDataUnoccupied, keyDataOccupied, keyDataUnoccupied uint64) {
+func (b *Bucket) Footprint(metrics *FootprintMetrics) {
 	// meta最初存锁和状态的大小(假设8字节锁)
-	meta += 8
+	metrics.Meta += 8
 	if LINKED {
 		// 假设state是int型，增加相应内存统计
 		// 具体根据您的实际State类型大小来定，这里假设8字节
-		meta += 8
+		metrics.Meta += 8
 	}
 
 	for i := 0; i < len(b.entries); i++ {
@@ -271,19 +271,19 @@ func (b *Bucket) Footprint() (meta, structuralDataOccupied, structuralDataUnoccu
 			// 按原C++逻辑:
 			// if((fingerprints[i] & 0b1) == 0b1)表示occupied
 			if b.fingerprints[i]&0b1 == 0b1 {
-				structuralDataOccupied += 1 // fingerprint占1字节
+				metrics.StructuralDataOccupied += 1 // fingerprint占1字节
 				// 假设每个entry 16字节 (可根据实际键值大小调整)
-				keyDataOccupied += 16
+				metrics.KeyDataOccupied += 16
 			} else {
-				structuralDataUnoccupied += 1
-				keyDataUnoccupied += 16
+				metrics.StructuralDataUnoccupied += 1
+				metrics.KeyDataUnoccupied += 16
 			}
 		} else {
 			// 无fingerprint时，根据key是否为空
 			if !IsEmptyKey(b.entries[i].Key) {
-				keyDataOccupied += 16
+				metrics.KeyDataOccupied += 16
 			} else {
-				keyDataUnoccupied += 16
+				metrics.KeyDataUnoccupied += 16
 			}
 		}
 	}
