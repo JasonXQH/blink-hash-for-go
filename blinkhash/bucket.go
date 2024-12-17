@@ -20,11 +20,17 @@ type Bucket struct {
 	entries      []Entry
 }
 
-func NewBucket(entryNum int) *Bucket {
-	return &Bucket{
-		fingerprints: make([]uint8, entryNum),
-		entries:      make([]Entry, entryNum),
+func NewBucket() *Bucket {
+	bucket := &Bucket{
+		lock:         0,
+		fingerprints: make([]uint8, EntryNum),
+		entries:      make([]Entry, EntryNum),
 	}
+	for j := 0; j < len(bucket.entries); j++ {
+		bucket.entries[j].Key = nil
+		bucket.entries[j].Value = nil
+	}
+	return bucket
 }
 
 func (b *Bucket) TryLock() bool {

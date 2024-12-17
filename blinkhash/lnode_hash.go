@@ -25,8 +25,8 @@ type LNodeHash struct {
 //
 
 func NewLNodeHash(level int) *LNodeHash {
-	cardinality := (LeafHashSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Bucket{}))
-	return &LNodeHash{
+	cardinality := LNodeHashCardinality
+	lnHash := &LNodeHash{
 		Node: Node{
 			lock:        0,
 			siblingPtr:  nil,
@@ -37,14 +37,19 @@ func NewLNodeHash(level int) *LNodeHash {
 		Type:           HashNode,
 		HighKey:        nil, // 需要在 Split 中设置
 		Cardinality:    cardinality,
-		Buckets:        make([]Bucket, 0, LeafHashSize),
+		Buckets:        make([]Bucket, cardinality),
 		LeftSiblingPtr: nil,
 	}
+	// 初始化每个桶的指纹和条目
+	for i := 0; i < lnHash.Cardinality; i++ {
+		lnHash.Buckets[i] = *NewBucket()
+	}
+	return lnHash
 }
 
 // NewLNodeHashWithSibling 创建一个新的 LNodeHash 节点，并设置兄弟节点、计数和层级
 func NewLNodeHashWithSibling(sibling NodeInterface, count, level int) *LNodeHash {
-	cardinality := (LeafHashSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Bucket{}))
+	cardinality := LNodeHashCardinality
 	newHashNode := &LNodeHash{
 		Node: Node{
 			lock:        0,
@@ -56,12 +61,11 @@ func NewLNodeHashWithSibling(sibling NodeInterface, count, level int) *LNodeHash
 		Type:           HashNode,
 		HighKey:        nil, // 需要在 Split 中设置
 		Cardinality:    cardinality,
-		Buckets:        make([]Bucket, count, LeafHashSize),
+		Buckets:        make([]Bucket, cardinality),
 		LeftSiblingPtr: nil,
 	}
-	// 初始化newRight的buckets
-	for i := range newHashNode.Buckets {
-		newHashNode.Buckets[i].entries = make([]Entry, EntryNum)
+	for i := 0; i < newHashNode.Cardinality; i++ {
+		newHashNode.Buckets[i] = *NewBucket()
 	}
 	return newHashNode
 }
@@ -1235,8 +1239,8 @@ func (lh *LNodeHash) Convert(version uint64) ([]*LNodeBTree, int, error) {
 	return leaves, num, nil
 }
 
-func (lh *LNodeHash) GetNode() Node {
-	return lh.Node
+func (lh *LNodeHash) GetNode() *Node {
+	return &lh.Node
 }
 
 func (lh *LNodeHash) GetType() NodeType {

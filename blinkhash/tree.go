@@ -14,7 +14,7 @@ type BTree struct {
 
 func NewBTree() *BTree {
 	return &BTree{
-		root:   NewLNodeHash(1), // 假设默认根节点是一个哈希节点
+		root:   NewLNodeHash(0), // 假设默认根节点是一个哈希节点
 		epoche: NewEpoche(256),  // 设置 Epoche 的初始容量或阈值
 		lock:   sync.Mutex{},
 	}
@@ -29,7 +29,7 @@ insertLoop: // 标签
 	for {
 		restart := false
 		cur := bt.root
-		stack := make([]*INode, 0)
+		stack := make([]INodeInterface, 0)
 
 		// Attempt to acquire read lock on the root node.
 		curVersion, needRestart := cur.TryReadLock()
@@ -39,11 +39,11 @@ insertLoop: // 标签
 
 		// Tree traversal to find the leaf node.
 		for cur.GetLevel() != 0 {
-			parent, ok := cur.(*INode)
-			if !ok {
-				panic("expected *INode")
-			}
-
+			parent := NewINode(cur.GetLevel(), nil, cur.GetSiblingPtr(), cur.GetLeftmostPtr())
+			//parent, ok := cur.(INodeInterface)
+			//if !ok {
+			//	panic("expected INodeInterface")
+			//}
 			child := parent.ScanNode(key)
 			childVersion, needRestart := child.TryReadLock()
 			if needRestart {
@@ -158,7 +158,7 @@ insertLoop: // 标签
 						}
 
 						// 更新当前父节点为兄弟节点
-						oldParent = sibling.(*INode)
+						oldParent = sibling.(INodeInterface)
 						parentVersion = siblingVersion
 					}
 
@@ -166,7 +166,8 @@ insertLoop: // 标签
 					if restartParent {
 						continue parentRestart
 					}
-					success, needRestart := oldParent.TryUpgradeWriteLock(oldParent.GetLock())
+					node := oldParent.GetNode()
+					success, needRestart := node.TryUpgradeWriteLock(oldParent.GetLock())
 					if !success || needRestart {
 						continue parentRestart
 					}
@@ -179,7 +180,8 @@ insertLoop: // 标签
 					}
 
 					// Internal node split.
-					newParent, newSplitKey := oldParent.Split()
+					splittableNode, newSplitKey := oldParent.Split(key, value, 0)
+					newParent := splittableNode.(INodeInterface)
 					if compareIntKeys(splitKey, newSplitKey) <= 0 {
 						oldParent.Insert(splitKey, newLeafNode.GetNode(), oldParent.GetLock())
 					} else {
@@ -192,7 +194,7 @@ insertLoop: // 标签
 						oldParent = stack[stackIdx]
 					} else { // set new root
 						if oldParent == bt.root {
-							newRoot := NewINodeForHeightGrowth(splitKey, oldParent, newParent, nil, oldParent.GetLevel()+1, newParent.HighKey)
+							newRoot := NewINodeForHeightGrowth(splitKey, oldParent, newParent, nil, oldParent.GetLevel()+1, newParent.GetHighKey())
 							bt.root = newRoot
 							oldParent.WriteUnlock()
 						} else {
@@ -303,7 +305,8 @@ func (bt *BTree) insertKey(key interface{}, value NodeInterface, prev NodeInterf
 			return
 		} else {
 			// 父节点分裂
-			newParent, splitKey := parent.Split()
+			splittableNode, splitKey := parent.Split(key, value, 0)
+			newParent, ok := splittableNode.(INodeInterface)
 			if !ok {
 				panic("newParentSplittableInterface cannot be INode")
 
@@ -315,7 +318,7 @@ func (bt *BTree) insertKey(key interface{}, value NodeInterface, prev NodeInterf
 					return
 				}
 			} else {
-				err := newParent.Insert(key, value, newParent.lock)
+				err := newParent.Insert(key, value, newParent.GetLock())
 				if err != InsertSuccess {
 					panic("parent.Insert failed!")
 					return
@@ -550,12 +553,6 @@ restart:
 	return false
 }
 
-// leafUpdate 封装leaf.update逻辑
-func leafUpdate(leaf LeafNodeInterface, key, value interface{}, version uint64) int {
-	// 假设leaf有update方法： 0成功，-1需要重启，1表示未找到
-	return leaf.Update(key, value, version)
-}
-
 // BatchInsert 实现batch_insert逻辑
 func (bt *BTree) BatchInsert(key []interface{}, value []NodeInterface, num int, prev NodeInterface, ti *ThreadInfo) {
 	eg := NewEpocheGuard(ti)
@@ -601,11 +598,7 @@ restart:
 			goto restart
 		}
 
-		ino, ok := sibling.(*INode)
-		if !ok {
-			panic("expected *INode")
-		}
-		cur = ino
+		cur = sibling
 		curVersion = siblingVersion
 	}
 
@@ -636,8 +629,8 @@ restart:
 
 	new_num := 0
 	var new_nodes []*INode
-	if parent.level == 1 {
-		new_nodes, _ = parent.BatchInsertLastLevel(key, value, num)
+	if parent.GetLevel() == 1 {
+		new_nodes, _ = parent.BatchInsertLastLevel(key, value, num, 0)
 	} else {
 		new_nodes, _ = parent.BatchInsert(key, value, num)
 	}
@@ -686,7 +679,7 @@ func (bt *BTree) NewRootForAdjustment(key []interface{}, value []NodeInterface, 
 	}
 
 	new_roots := make([]*INode, new_num)
-	idx := 0
+	//idx := 0
 	for i := 0; i < new_num; i++ {
 		// 假设level+1
 		level := value[0].GetLevel() + 1
@@ -694,8 +687,7 @@ func (bt *BTree) NewRootForAdjustment(key []interface{}, value []NodeInterface, 
 		// 在C++中是 new_roots[i]->batch_insert(key, value, idx, num, batch_size);
 		// 在Go中需要INode实现batch_insert或batch_insert_last_level
 		// 根据之前逻辑实现:
-		new_roots[i].BatchInsertForRoot(key, value, &idx, num, batch_size)
-
+		//new_roots[i].BatchInsertForRoot(key, value, &idx, num, batch_size)
 		if i < new_num-1 {
 			new_roots[i].siblingPtr = new_roots[i+1]
 		}
@@ -705,6 +697,13 @@ func (bt *BTree) NewRootForAdjustment(key []interface{}, value []NodeInterface, 
 
 // nodeInterfaceSlice 将[]*INode转换为[]NodeInterface
 func nodeInterfaceSlice(nodes []*INode) []NodeInterface {
+	res := make([]NodeInterface, len(nodes))
+	for i, n := range nodes {
+		res[i] = n
+	}
+	return res
+}
+func nodeInterfaceSliceForBTreeNode(nodes []*LNodeBTree) []NodeInterface {
 	res := make([]NodeInterface, len(nodes))
 	for i, n := range nodes {
 		res[i] = n
@@ -779,10 +778,10 @@ restart:
 		// -1需要重启
 		// -2需要convert
 		// 其他为已插入个数
-		if ret == -1 {
+		if ret == NeedRestart {
 			goto restart
 		} else if ret == -2 {
-			bt.convertLeaf(leafVersion, ti)
+			bt.convert(leaf, leafVersion, ti)
 			goto restart
 		}
 		continued = true
@@ -820,18 +819,24 @@ restart:
 
 // convert 对叶子节点进行转换，与C++一致
 func (bt *BTree) convert(leaf LeafNodeInterface, leafVersion uint64, ti *ThreadInfo) bool {
-	num, nodes := leafConvert(leaf, leafVersion)
-	if nodes == nil {
+	hashNode, ok := leaf.(*LNodeHash)
+	if !ok {
+		panic("Need leaf to be LNodeHashs")
+	}
+	bTreeNodes, num, err := hashNode.Convert(leafVersion)
+	if err != nil {
+		panic(err)
+	}
+	if bTreeNodes == nil {
 		return false
 	}
-
 	split_key := make([]interface{}, num)
-	split_key[0] = nodes[0].GetHighKey()
+	split_key[0] = bTreeNodes[0].GetHighKey()
 	for i := 1; i < num; i++ {
-		split_key[i] = nodes[i-1].GetHighKey()
+		split_key[i] = bTreeNodes[i-1].GetHighKey()
 	}
 
-	bt.BatchInsert(split_key, nodeInterfaceSlice(nodes), num, leaf.(NodeInterface), ti)
+	bt.BatchInsert(split_key, nodeInterfaceSliceForBTreeNode(bTreeNodes), num, leaf.(NodeInterface), ti)
 	return true
 }
 
@@ -848,7 +853,7 @@ func (bt *BTree) ConvertAll(ti *ThreadInfo) {
 	if !ok {
 		panic("expected LeafNodeInterface")
 	}
-	curVersion, needRestart := leaf.GetVersion()
+	curVersion, _ := leaf.GetVersion()
 	// 在C++中没有明确的重启逻辑，此处暂不做重启处理
 
 	for {
@@ -1115,7 +1120,26 @@ func (bt *BTree) getTreadInfo() *ThreadInfo {
 	return NewThreadInfo(bt.epoche)
 }
 
+func (bt *BTree) GetEpoche() *Epoche {
+	return bt.epoche
+
+}
+func (bt *BTree) GetHeight() int {
+	return bt.root.GetLevel()
+
+}
+func (bt *BTree) GetThreadInfo() *ThreadInfo {
+	info := ThreadInfo{
+		Epoche: bt.epoche,
+	}
+	return &info
+}
+
 // sizeofKey 返回Key的大小（示例）。
 func sizeofKey() uint64 {
 	return uint64(unsafe.Sizeof(int(0))) // 假设Key是int类型
+}
+
+func sizeofUint8() uint8 {
+	return uint8(unsafe.Sizeof(int(0))) // 假设Key是int类型
 }

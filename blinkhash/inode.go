@@ -85,6 +85,10 @@ func (in *INode) IsFull() bool {
 	return in.count == cap(in.Entries)
 }
 
+func (in *INode) GetNode() *Node {
+	return &in.Node
+}
+
 // FindLowerBound findLowerBound 在有序切片中线性搜索，找到第一个不小于给定键的元素位置
 func (in *INode) FindLowerBound(key interface{}) int {
 	keyInt, ok := key.(int)
@@ -187,7 +191,7 @@ func (in *INode) InsertWithLeft(key interface{}, value *Node, left *Node) error 
 }
 
 // Split 分裂当前 INode 节点，返回新的节点和分裂键
-func (in *INode) Split() (*INode, interface{}) {
+func (in *INode) Split(key interface{}, value interface{}, version uint64) (Splittable, interface{}) {
 	half := in.count / 2
 	splitKey := in.Entries[half].Key
 
@@ -239,7 +243,7 @@ func (in *INode) BatchMigrate(migrate []Entry, migrateIdx int, migrateNum int) (
 
 // BatchKvPair 将键值对批量填充到 INode 的 Entries 中
 // 返回更新后的 idx, 是否达到 batchSize, 和错误（如果有）
-func (in *INode) BatchKvPair(keys []interface{}, values []*Node, idx int, num int, batchSize int) (int, bool, error) {
+func (in *INode) BatchKvPair(keys []interface{}, values []NodeInterface, idx int, num int, batchSize int) (int, bool, error) {
 	for in.count < batchSize && idx < num-1 {
 		in.Entries = append(in.Entries, Entry{
 			Key:   keys[idx],
@@ -312,7 +316,7 @@ func (in *INode) BatchBuffer(buf []Entry, bufIdx int, bufNum int, batchSize int)
 // 返回更新后的 migrateIdx, bufIdx 和错误（如果有）
 func (in *INode) BatchInsertLastLevelWithMigrationAndMovement(
 	migrate []Entry, migrateIdx int, migrateNum int,
-	keys []interface{}, values []*Node, idx int, num int, batchSize int,
+	keys []interface{}, values []NodeInterface, idx int, num int, batchSize int,
 	buf []Entry, bufIdx int, bufNum int,
 ) (int, int, error) {
 	fromStart := true
@@ -380,7 +384,7 @@ func (in *INode) BatchInsertLastLevelWithMigrationAndMovement(
 // BatchInsertLastLevelWithMovement 批量插入到叶子节点，考虑迁移和缓冲区
 // 返回更新后的 idx, bufIdx 和错误（如果有）
 func (in *INode) BatchInsertLastLevelWithMovement(
-	keys []interface{}, values []*Node, idx int, num int, batchSize int, // 键值对
+	keys []interface{}, values []NodeInterface, idx int, num int, batchSize int, // 键值对
 	buf []Entry, bufIdx int, bufNum int, // 缓冲区
 ) (int, int, error) {
 	fromStart := true
@@ -433,7 +437,7 @@ func (in *INode) BatchInsertLastLevelWithMovement(
 
 // BatchInsertLastLevel 批量插入到叶子节点，包括迁移和缓冲区处理
 // 返回新节点集合、新Num 和错误（如果有）
-func (in *INode) BatchInsertLastLevel(keys []interface{}, values []*Node, num int, batchSize int) ([]*INode, error) {
+func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]*INode, error) {
 	pos := in.FindLowerBound(keys[0])
 	batchSizeCalc := int(float64(in.Cardinality) * FillFactor)
 	inplace := (in.count + num) < in.Cardinality
@@ -596,7 +600,7 @@ func (in *INode) CalculateNodeNum(totalNum int, batchSize int) (newNum int, last
 	return
 }
 
-func (in *INode) InsertForRoot(keys []interface{}, values []*Node, left *Node, num int) {
+func (in *INode) InsertForRoot(keys []interface{}, values []NodeInterface, left *Node, num int) {
 	in.leftmostPtr = left
 	for i := 0; i < num; i++ {
 		in.Entries = append(in.Entries, Entry{
@@ -676,7 +680,7 @@ func (in *INode) SanityCheck(prevHighKey interface{}, first bool) {
 // 返回更新后的 migrateIdx, bufIdx 和错误（如果有）
 func (in *INode) BatchInsertWithMigrationAndMovement(
 	migrate []Entry, migrateIdx int, migrateNum int,
-	keys []interface{}, values []*Node, idx int, num int,
+	keys []interface{}, values []NodeInterface, idx int, num int,
 	batchSize int, buf []Entry, bufIdx int, bufNum int,
 ) (int, int, error) {
 	fromStart := true
@@ -738,7 +742,7 @@ func (in *INode) BatchInsertWithMigrationAndMovement(
 // BatchInsertWithMovement 批量插入到叶子节点，考虑迁移和缓冲区
 // 返回更新后的 idx, bufIdx 和错误（如果有）
 func (in *INode) BatchInsertWithMovement(
-	keys []interface{}, values []*Node, idx int, num int,
+	keys []interface{}, values []NodeInterface, idx int, num int,
 	batchSize int, buf []Entry, bufIdx int, bufNum int,
 ) (int, int, error) {
 	fromStart := true
@@ -787,7 +791,7 @@ func (in *INode) BatchInsertWithMovement(
 // BatchInsert 批量插入到叶子节点，包括迁移和缓冲区处理
 // 返回新节点集合和错误（如果有）
 func (in *INode) BatchInsert(
-	keys []interface{}, values []*Node, num int,
+	keys []interface{}, values []NodeInterface, num int,
 ) ([]*INode, error) {
 	pos := in.FindLowerBound(keys[0])
 	batchSize := int(float64(in.Cardinality) * FillFactor)

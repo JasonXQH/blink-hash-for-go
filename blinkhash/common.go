@@ -1,5 +1,7 @@
 package blinkhash
 
+import "unsafe"
+
 const (
 	BASENode  NodeType = iota
 	INNERNode NodeType = iota
@@ -47,8 +49,6 @@ type Value64 uint64
 
 // 其他需要的常量或函数可以在这里定义。
 const (
-	EntryNum      = 32
-	PageSize      = 512 // 示例页大小，具体值应根据实际情况调整
 	FillFactor    = 1.0
 	BITS_PER_LONG = 64
 	LeafBTreeSize = PageSize
@@ -86,3 +86,19 @@ const (
 	NumSlot          = 4
 	EmptyFingerprint = 0
 )
+
+// prod
+const (
+	LNodeHashCardinality  = (LeafHashSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Bucket{}))
+	LNodeBTreeCardinality = (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
+	EntryNum              = 32
+	PageSize              = 512 // 示例页大小，具体值应根据实际情况调整
+)
+
+// dev
+//const (
+//	LNodeHashCardinality  = 10
+//	LNodeBTreeCardinality = 10
+//	EntryNum              = 4
+//	PageSize              = 16
+//)

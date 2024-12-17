@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 )
 
 type LabelDelete struct {
-	Nodes      [EntryNum]unsafe.Pointer
+	Nodes      [EntryNum]NodeInterface
 	Epoche     uint64
 	NodesCount int
 	Next       *LabelDelete
@@ -36,7 +35,7 @@ func (d *DeletionList) Head() *LabelDelete {
 	return d.HeadDeletionList
 }
 
-func (d *DeletionList) Add(n unsafe.Pointer, globalEpoch uint64) {
+func (d *DeletionList) Add(n NodeInterface, globalEpoch uint64) {
 	d.DeletionListCount++
 	var label *LabelDelete
 	if d.HeadDeletionList != nil && d.HeadDeletionList.NodesCount < EntryNum {
@@ -125,7 +124,7 @@ func (e *Epoche) EnterEpoche(ti *ThreadInfo) {
 }
 
 // MarkNodeForDeletion marks a node for deletion.
-func (e *Epoche) MarkNodeForDeletion(n unsafe.Pointer, ti *ThreadInfo) {
+func (e *Epoche) MarkNodeForDeletion(n NodeInterface, ti *ThreadInfo) {
 	currentEpoche := atomic.LoadUint64(&e.CurrentEpoche)
 	ti.DeletionList.Add(n, currentEpoche)
 	ti.DeletionList.ThresholdCounter++

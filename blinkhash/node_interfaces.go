@@ -18,6 +18,25 @@ type NodeInterface interface {
 	GetType() NodeType
 }
 
+type INodeInterface interface {
+	NodeInterface
+	Insertable
+	Splittable
+	NodeGetter
+	NodeScanner
+	FullJudger
+}
+
+//type LeafNodeInterface interface {
+//	INodeInterface
+//	Updatable
+//	Removable
+//	Finder
+//	RangeLookuper
+//	Utilizer
+//	FootPrinter
+//}
+
 type LeafNodeInterface interface {
 	NodeInterface
 	Insertable
@@ -67,9 +86,16 @@ type Utilizer interface {
 }
 
 type NodeGetter interface {
-	GetNode() Node
+	GetNode() *Node
 }
 
 type FootPrinter interface {
 	Footprint(metrics *FootprintMetrics)
+}
+
+type NodeScanner interface {
+	ScanNode(key interface{}) *Node
+}
+type FullJudger interface {
+	IsFull() bool
 }

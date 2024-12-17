@@ -15,7 +15,7 @@ type LNodeBTree struct {
 
 // NewLNodeBTree 创建一个新的 LNodeBTree 节点
 func NewLNodeBTree(level int) *LNodeBTree {
-	cardinality := (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
+	cardinality := LNodeBTreeCardinality
 	return &LNodeBTree{
 		Node: Node{
 			lock:        0,
@@ -512,8 +512,8 @@ func (lb *LNodeBTree) Footprint(metrics *FootprintMetrics) {
 
 }
 
-func (lb *LNodeBTree) GetNode() Node {
-	return lb.Node
+func (lb *LNodeBTree) GetNode() *Node {
+	return &lb.Node
 }
 
 func (lb *LNodeBTree) GetType() NodeType {

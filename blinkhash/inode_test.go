@@ -51,9 +51,9 @@ func TestINode_Insert(t *testing.T) {
 
 	newNode1 := NewNode(1)
 	// 插入第一条
-	err := inode.Insert(10, newNode1)
-	if err != nil {
-		t.Fatalf("Insert failed: %v", err)
+	ret := inode.Insert(10, newNode1, inode.GetLock())
+	if ret != InsertSuccess {
+		t.Errorf("Insert failed")
 	}
 	if inode.count != 1 {
 		t.Errorf("Expected count to be 1, got %d", inode.count)
@@ -73,7 +73,7 @@ func TestINode_Insert(t *testing.T) {
 
 	newNode2 := NewNode(2)
 	// 插入第二条
-	err = inode.InsertWithLeft(20, newNode2, NewNode(1))
+	err := inode.InsertWithLeft(20, newNode2, NewNode(1))
 	if err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
@@ -97,14 +97,15 @@ func TestINode_Split(t *testing.T) {
 	batchSize := 4
 	// 假设卡片容量为4
 	for i := 1; i <= batchSize; i++ {
-		err := inode.Insert(i*10, NewNode(i))
-		if err != nil {
-			t.Fatalf("Insert failed: %v", err)
+		ret := inode.Insert(i*10, NewNode(i), 0)
+		if ret != InsertSuccess {
+			t.Fatalf("Insert failed")
 		}
 	}
 
 	// 分裂节点
-	newNode, splitKey := inode.Split()
+	splittableNode, splitKey := inode.Split(0, 0, 0)
+	newNode := splittableNode.(INodeInterface)
 	if newNode == nil {
 		t.Fatalf("Split returned nil")
 	}
@@ -114,16 +115,16 @@ func TestINode_Split(t *testing.T) {
 	if inode.count != 2 {
 		t.Errorf("Expected original node count to be 2, got %d", inode.count)
 	}
-	if newNode.count != 1 {
-		t.Errorf("Expected new node count to be 1, got %d", newNode.count)
+	if newNode.GetCount() != 1 {
+		t.Errorf("Expected new node count to be 1, got %d", newNode.GetCount())
 	}
 	if inode.HighKey != 30 {
 		t.Errorf("Expected original node HighKey to be 30, got %v", inode.HighKey)
 	}
-	if newNode.HighKey != 40 {
-		t.Errorf("Expected new node HighKey to be 40, got %v", newNode.HighKey)
+	if newNode.GetHighKey() != 40 {
+		t.Errorf("Expected new node HighKey to be 40, got %v", newNode.GetHighKey())
 	}
-	if inode.siblingPtr != &newNode.Node {
+	if inode.siblingPtr != newNode.GetNode() {
 		t.Errorf("Expected original node siblingPtr to point to new node")
 	}
 }
@@ -142,7 +143,7 @@ func TestINode_BatchInsert(t *testing.T) {
 		values := []*Node{NewNode(1), NewNode(2)}
 		num := 2
 
-		newNodes, err := inode.BatchInsert(keys, values, num)
+		newNodes, err := inode.BatchInsert(keys, nodeInterfaceSliceForNodes(values), num)
 		if err != nil {
 			t.Fatalf("BatchInsert failed: %v", err)
 		}
@@ -168,7 +169,7 @@ func TestINode_BatchInsert(t *testing.T) {
 		batch2Values := []*Node{NewNode(15), NewNode(17)}
 		batch2Num := 2
 
-		newNodes, err = inode.BatchInsert(batch2Keys, batch2Values, batch2Num)
+		newNodes, err = inode.BatchInsert(batch2Keys, nodeInterfaceSliceForNodes(batch2Values), batch2Num)
 		if err != nil {
 			t.Fatalf("BatchInsert failed: %v", err)
 		}
@@ -191,7 +192,7 @@ func TestINode_BatchInsert(t *testing.T) {
 		values := []*Node{NewNode(10), NewNode(15), NewNode(17), NewNode(20)}
 		num := 4
 
-		newNodes, err := inode.BatchInsert(keys, values, num)
+		newNodes, err := inode.BatchInsert(keys, nodeInterfaceSliceForNodes(values), num)
 		if err != nil {
 			t.Fatalf("BatchInsert failed: %v", err)
 		}
@@ -217,7 +218,7 @@ func TestINode_BatchInsert(t *testing.T) {
 		batch2Values := []*Node{NewNode(12), NewNode(18)}
 		batch2Num := 2
 
-		newNodes, err = inode.BatchInsert(batch2Keys, batch2Values, batch2Num)
+		newNodes, err = inode.BatchInsert(batch2Keys, nodeInterfaceSliceForNodes(batch2Values), batch2Num)
 		if err != nil {
 			t.Fatalf("BatchInsert failed: %v", err)
 		}
@@ -241,7 +242,7 @@ func TestINode_BatchInsert(t *testing.T) {
 		values := []*Node{NewNode(10), NewNode(15), NewNode(20)}
 		num := 3
 
-		newNodes, err := inode.BatchInsert(keys, values, num)
+		newNodes, err := inode.BatchInsert(keys, nodeInterfaceSliceForNodes(values), num)
 		if err != nil {
 			t.Fatalf("BatchInsert failed: %v", err)
 		}
@@ -267,7 +268,7 @@ func TestINode_BatchInsert(t *testing.T) {
 		batch2Values := []*Node{NewNode(12), NewNode(18)}
 		batch2Num := 2
 
-		newNodes, err = inode.BatchInsert(batch2Keys, batch2Values, batch2Num)
+		newNodes, err = inode.BatchInsert(batch2Keys, nodeInterfaceSliceForNodes(batch2Values), batch2Num)
 		if err != nil {
 			t.Fatalf("BatchInsert failed: %v", err)
 		}
@@ -322,7 +323,7 @@ func TestINode_BatchKvPair(t *testing.T) {
 	batchSize := 2
 	idx := 0
 
-	newIdx, reached, err := inode.BatchKvPair(keys, values, idx, num, batchSize)
+	newIdx, reached, err := inode.BatchKvPair(keys, nodeInterfaceSliceForNodes(values), idx, num, batchSize)
 	if err != nil {
 		t.Fatalf("BatchKvPair failed: %v", err)
 	}
@@ -340,7 +341,7 @@ func TestINode_BatchKvPair(t *testing.T) {
 	}
 
 	// 执行剩余插入
-	newIdx, reached, err = inode.BatchKvPair(keys, values, newIdx, num, batchSize)
+	newIdx, reached, err = inode.BatchKvPair(keys, nodeInterfaceSliceForNodes(values), newIdx, num, batchSize)
 	if err != nil {
 		t.Fatalf("BatchKvPair failed on second call: %v", err)
 	}
@@ -415,7 +416,7 @@ func TestINode_SplitAndBatchInsert(t *testing.T) {
 	num := 4
 
 	// 批量插入
-	newNodes, err := inode.BatchInsert(keys, values, num)
+	newNodes, err := inode.BatchInsert(keys, nodeInterfaceSliceForNodes(values), num)
 	if err != nil {
 		t.Fatalf("BatchInsert failed: %v", err)
 	}
@@ -435,7 +436,7 @@ func TestINode_SplitAndBatchInsert(t *testing.T) {
 	valuesSplit := []*Node{NewNode(5), NewNode(6)}
 	numSplit := 2
 
-	newNodes, err = inode.BatchInsert(keysSplit, valuesSplit, numSplit)
+	newNodes, err = inode.BatchInsert(keysSplit, nodeInterfaceSliceForNodes(valuesSplit), numSplit)
 	if err != nil {
 		t.Fatalf("BatchInsert after split failed: %v", err)
 	}
@@ -465,16 +466,16 @@ func TestINode_SanityCheck(t *testing.T) {
 	num := 4
 
 	for i := 0; i < num; i++ {
-		err := inode.Insert(keys[i], values[i])
-		if err != nil {
-			t.Fatalf("Insert failed: %v", err)
+		ret := inode.Insert(keys[i], values[i], 0)
+		if ret != InsertSuccess {
+			t.Fatalf("Insert failed")
 		}
 	}
 
 	// 添加一个打乱顺序的键，期待 SanityCheck 报错
-	err := inode.Insert(25, NewNode(5))
-	if err != nil {
-		t.Fatalf("Insert failed: %v", err)
+	err := inode.Insert(25, NewNode(5), 0)
+	if err != InsertSuccess {
+		t.Fatalf("Insert failed")
 	}
 
 	// 进行 SanityCheck
@@ -496,9 +497,9 @@ func TestINode_ScanNode(t *testing.T) {
 	num := 3
 
 	for i := 0; i < num; i++ {
-		err := inode.Insert(keys[i], values[i])
-		if err != nil {
-			t.Fatalf("Insert failed: %v", err)
+		ret := inode.Insert(keys[i], values[i], 0)
+		if ret != InsertSuccess {
+			t.Fatalf("Insert failed")
 		}
 	}
 
@@ -531,7 +532,7 @@ func ExampleINode_Print() {
 	num := 3
 
 	for i := 0; i < num; i++ {
-		inode.Insert(keys[i], values[i])
+		inode.Insert(keys[i], values[i], inode.GetLock())
 	}
 
 	inode.Print()
@@ -544,3 +545,10 @@ func ExampleINode_Print() {
 }
 
 // Similarly, other methods like BatchInsertWithMigrationAndMovement can have their own test cases.
+func nodeInterfaceSliceForNodes(nodes []*Node) []NodeInterface {
+	res := make([]NodeInterface, len(nodes))
+	for i, n := range nodes {
+		res[i] = n
+	}
+	return res
+}
