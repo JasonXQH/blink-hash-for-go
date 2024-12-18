@@ -138,9 +138,9 @@ func (lh *LNodeHash) TryConvertLock(version uint64) bool {
 	return true
 }
 
-// SplitUnlock 释放分裂时的锁，等同于 C++ 的 split_unlock
-func (lh *LNodeHash) SplitUnlock() {
-	lh.WriteUnlock()
+// WriteUnlock 释放分裂时的锁，等同于 C++ 的 split_unlock
+func (lh *LNodeHash) WriteUnlock() {
+	lh.Node.WriteUnlock()
 	for i := 0; i < lh.Cardinality; i++ {
 		lh.Buckets[i].Unlock()
 	}
@@ -190,7 +190,7 @@ func (lh *LNodeHash) Hash(key interface{}) uint8 {
 // @return int
 
 func (lh *LNodeHash) Insert(key interface{}, value interface{}, version uint64) int {
-	fmt.Println("我是LNodeHash，调用Insert")
+	//fmt.Println("我是LNodeHash，调用Insert")
 
 	// 根据 FINGERPRINT 设置初始化 empty
 	for k := 0; k < HashFuncsNum; k++ {
@@ -473,7 +473,7 @@ InsertLoop:
 		newRight.Cardinality = len(newRight.Buckets)
 		if newRight.siblingPtr == nil {
 			util := newRight.Utilization() * 100
-			fmt.Println(util, "%")
+			fmt.Printf("util: %.2f%%\n", util)
 		}
 	}
 

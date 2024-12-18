@@ -185,7 +185,7 @@ func (lb *LNodeBTree) Split(key interface{}, value interface{}, version uint64) 
 		hashNode.LeftSiblingPtr = newLeaf
 	}
 	//return &newLeaf.Node
-	fmt.Println("我是LNodeBTree，调用Split")
+	//fmt.Println("我是LNodeBTree，调用Split")
 	return newLeaf, splitKey
 }
 

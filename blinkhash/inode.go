@@ -11,6 +11,7 @@ type INode struct {
 	Node                    // 嵌入 Node 结构以复用基本字段
 	HighKey     interface{} // 最高键
 	Entries     []Entry     // 条目切片
+	Type        NodeType
 }
 
 func (in *INode) GetHighKey() interface{} {
@@ -26,6 +27,7 @@ func NewINode(level int, highKey interface{}, sibling, left NodeInterface) *INod
 			siblingPtr:  sibling,
 			leftmostPtr: left,
 		},
+		Type:        INNERNode,
 		Cardinality: cardinality,
 		HighKey:     highKey,
 		Entries:     make([]Entry, cardinality),
@@ -41,6 +43,7 @@ func NewINodeFromLeaves(node NodeInterface) *INode {
 			siblingPtr:  node.GetSiblingPtr(),
 			leftmostPtr: node.GetLeftmostPtr(),
 		},
+		Type:        INNERNode,
 		Cardinality: cardinality,
 		HighKey:     node.GetHighKey(),
 		Entries:     node.GetEntries(),
@@ -55,6 +58,7 @@ func NewINodeForInsertInBatch(level int) *INode {
 		Node: Node{
 			level: level,
 		},
+		Type:        INNERNode,
 		Cardinality: cardinality,
 		Entries:     make([]Entry, cardinality), // 初始化为空但有容量
 	}
@@ -69,6 +73,7 @@ func NewINodeForHeightGrowth(splitKey interface{}, left, right, sibling NodeInte
 			leftmostPtr: left,
 			count:       1, // 只有一个条目
 		},
+		Type:    INNERNode,
 		HighKey: highKey,
 		Entries: make([]Entry, 1), // 只有一个条目
 	}
@@ -89,6 +94,7 @@ func NewINodeForSplit(sibling NodeInterface, count int, left NodeInterface, leve
 			count:       count,
 			level:       level,
 		},
+		Type:    INNERNode,
 		HighKey: highKey,
 		Entries: make([]Entry, count),
 	}
@@ -974,4 +980,7 @@ func (n *INode) GetRightmostPtr() NodeInterface {
 }
 func (n *INode) GetEntries() []Entry {
 	return n.Entries
+}
+func (n *INode) GetType() NodeType {
+	return INNERNode
 }
