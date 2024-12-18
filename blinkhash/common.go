@@ -1,7 +1,5 @@
 package blinkhash
 
-import "unsafe"
-
 const (
 	BASENode  NodeType = iota
 	INNERNode NodeType = iota
@@ -82,23 +80,27 @@ func compareIntKeys(key1, key2 interface{}) int {
 const (
 	LINKED           = false // 启用链接机制
 	FINGERPRINT      = false // 启用指纹机制
-	HashFuncsNum     = 2
-	NumSlot          = 4
 	EmptyFingerprint = 0
 )
 
 // prod
-const (
-	LNodeHashCardinality  = (LeafHashSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Bucket{}))
-	LNodeBTreeCardinality = (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
-	EntryNum              = 32
-	PageSize              = 512 // 示例页大小，具体值应根据实际情况调整
-)
+//const (
+//	LNodeHashCardinality  = (LeafHashSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Bucket{}))
+//	LNodeBTreeCardinality = (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
+//	INodeCardinality 	  = int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
+//	EntryNum              = 32
+//	PageSize              = 512 // 示例页大小，具体值应根据实际情况调整
+//	HashFuncsNum     	  = 2
+//	NumSlot           	  = 4
+//)
 
 // dev
-//const (
-//	LNodeHashCardinality  = 10
-//	LNodeBTreeCardinality = 10
-//	EntryNum              = 4
-//	PageSize              = 16
-//)
+const (
+	LNodeHashCardinality  = 4
+	LNodeBTreeCardinality = 4
+	INodeCardinality      = 4
+	EntryNum              = 2
+	PageSize              = 4
+	HashFuncsNum          = 1
+	NumSlot               = 2
+)

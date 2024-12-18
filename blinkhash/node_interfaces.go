@@ -16,6 +16,7 @@ type NodeInterface interface {
 	GetHighKey() interface{}
 	SanityCheck(prevHighKey interface{}, first bool)
 	GetType() NodeType
+	EntryGetter
 }
 
 type INodeInterface interface {
@@ -94,8 +95,12 @@ type FootPrinter interface {
 }
 
 type NodeScanner interface {
-	ScanNode(key interface{}) *Node
+	ScanNode(key interface{}) NodeInterface
 }
 type FullJudger interface {
 	IsFull() bool
+}
+
+type EntryGetter interface {
+	GetEntries() []Entry
 }

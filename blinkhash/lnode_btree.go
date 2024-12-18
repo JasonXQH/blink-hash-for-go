@@ -33,7 +33,7 @@ func NewLNodeBTree(level int) *LNodeBTree {
 
 // NewLNodeBTreeWithLevel 创建一个新的 LNodeBTree 节点，指定层级
 func NewLNodeBTreeWithLevel(level int) *LNodeBTree {
-	cardinality := (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
+	cardinality := LNodeBTreeCardinality
 	return &LNodeBTree{
 		Node: Node{
 			lock:        0,
@@ -45,13 +45,13 @@ func NewLNodeBTreeWithLevel(level int) *LNodeBTree {
 		Type:        BTreeNode,
 		HighKey:     nil, // 需要在 Split 中设置
 		Cardinality: cardinality,
-		Entries:     make([]Entry, 0, LeafBTreeSize),
+		Entries:     make([]Entry, LeafBTreeSize),
 	}
 }
 
 // NewLNodeBTreeWithSibling 创建一个新的 LNodeBTree 节点，并设置兄弟节点、计数和层级
 func NewLNodeBTreeWithSibling(sibling NodeInterface, count, level int) *LNodeBTree {
-	cardinality := (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
+	cardinality := LNodeBTreeCardinality
 	return &LNodeBTree{
 		Node: Node{
 			lock:        0,
@@ -518,4 +518,8 @@ func (lb *LNodeBTree) GetNode() *Node {
 
 func (lb *LNodeBTree) GetType() NodeType {
 	return BTreeNode
+}
+
+func (lb *LNodeBTree) GetEntries() []Entry {
+	return lb.Entries
 }

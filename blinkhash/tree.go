@@ -39,7 +39,7 @@ insertLoop: // 标签
 
 		// Tree traversal to find the leaf node.
 		for cur.GetLevel() != 0 {
-			parent := NewINode(cur.GetLevel(), nil, cur.GetSiblingPtr(), cur.GetLeftmostPtr())
+			parent := NewINodeFromLeaves(cur)
 			//parent, ok := cur.(INodeInterface)
 			//if !ok {
 			//	panic("expected INodeInterface")
@@ -326,7 +326,7 @@ func (bt *BTree) insertKey(key interface{}, value NodeInterface, prev NodeInterf
 			}
 
 			if parent == bt.root {
-				// 创建新的根节点
+				// 创建新的根节点.newParent成为了INodeInterface
 				newRoot := NewINodeForHeightGrowth(splitKey, parent, newParent, nil, parent.level+1, parent.HighKey)
 				bt.root = newRoot
 				parent.WriteUnlock()

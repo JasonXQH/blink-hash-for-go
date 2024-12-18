@@ -190,7 +190,7 @@ func (lh *LNodeHash) Hash(key interface{}) uint8 {
 // @return int
 
 func (lh *LNodeHash) Insert(key interface{}, value interface{}, version uint64) int {
-	//fmt.Println("我是LNodeHash，调用Insert")
+	fmt.Println("我是LNodeHash，调用Insert")
 
 	// 根据 FINGERPRINT 设置初始化 empty
 	for k := 0; k < HashFuncsNum; k++ {
@@ -1242,7 +1242,9 @@ func (lh *LNodeHash) Convert(version uint64) ([]*LNodeBTree, int, error) {
 func (lh *LNodeHash) GetNode() *Node {
 	return &lh.Node
 }
-
+func (lh *LNodeHash) GetEntries() []Entry {
+	return nil
+}
 func (lh *LNodeHash) GetType() NodeType {
 	return HashNode
 }

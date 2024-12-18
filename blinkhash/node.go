@@ -155,6 +155,9 @@ func (n *Node) WriteUnlockObsolete() {
 		// 如果 CompareAndSwap 失败，重试
 	}
 }
+func (n *Node) GetEntries() []Entry {
+	return nil
+}
 
 // TryUpgradeWriteLock 尝试升级写锁，如果版本不匹配或不能锁定则设置需要重启标志
 func (n *Node) TryUpgradeWriteLock(version uint64) (bool, bool) {

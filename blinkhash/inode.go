@@ -2,7 +2,6 @@ package blinkhash
 
 import (
 	"fmt"
-	"unsafe"
 )
 
 // INode 结构在 Go 中模仿 inode_t 的功能。
@@ -20,7 +19,7 @@ func (in *INode) GetHighKey() interface{} {
 
 // NewINode 创建并初始化一个 INode 实例，适用于各种构造场景
 func NewINode(level int, highKey interface{}, sibling, left NodeInterface) *INode {
-	cardinality := int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
+	cardinality := INodeCardinality
 	inode := &INode{
 		Node: Node{
 			level:       level,
@@ -29,20 +28,35 @@ func NewINode(level int, highKey interface{}, sibling, left NodeInterface) *INod
 		},
 		Cardinality: cardinality,
 		HighKey:     highKey,
-		Entries:     make([]Entry, 0, cardinality),
+		Entries:     make([]Entry, cardinality),
+	}
+	return inode
+}
+
+func NewINodeFromLeaves(node NodeInterface) *INode {
+	cardinality := INodeCardinality
+	inode := &INode{
+		Node: Node{
+			level:       node.GetLevel(),
+			siblingPtr:  node.GetSiblingPtr(),
+			leftmostPtr: node.GetLeftmostPtr(),
+		},
+		Cardinality: cardinality,
+		HighKey:     node.GetHighKey(),
+		Entries:     node.GetEntries(),
 	}
 	return inode
 }
 
 // NewINodeSimple 传入 level 的简单构造函数
 func NewINodeForInsertInBatch(level int) *INode {
-	cardinality := int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
+	cardinality := INodeCardinality
 	return &INode{
 		Node: Node{
 			level: level,
 		},
 		Cardinality: cardinality,
-		Entries:     make([]Entry, 0, cardinality), // 初始化为空但有容量
+		Entries:     make([]Entry, cardinality), // 初始化为空但有容量
 	}
 }
 
@@ -105,7 +119,7 @@ func (in *INode) FindLowerBound(key interface{}) int {
 }
 
 // ScanNode 根据提供的键扫描并返回对应的节点
-func (in *INode) ScanNode(key interface{}) *Node {
+func (in *INode) ScanNode(key interface{}) NodeInterface {
 	if in.siblingPtr != nil {
 		// 假设 HighKey 是 int 类型，确保 key 也是 int 类型
 		keyInt, ok := key.(int)
@@ -127,11 +141,11 @@ func (in *INode) ScanNode(key interface{}) *Node {
 	}
 	idx := in.FindLowerBound(key)
 	if idx >= 0 && idx < in.count {
-		if node, ok := in.Entries[idx].Value.(*Node); ok {
+		if node, ok := in.Entries[idx].Value.(NodeInterface); ok {
 			return node
 		}
 	} else {
-		if node, ok := in.leftmostPtr.(*Node); ok {
+		if node, ok := in.leftmostPtr.(NodeInterface); ok {
 			return node
 		}
 	}
@@ -957,4 +971,7 @@ func (n *INode) GetRightmostPtr() NodeInterface {
 		return value
 	}
 	return nil
+}
+func (n *INode) GetEntries() []Entry {
+	return n.Entries
 }
