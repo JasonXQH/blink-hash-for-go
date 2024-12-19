@@ -1,13 +1,13 @@
 package test
 
 import (
-	"2024-11-timeseries-go/blinkhash"
 	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
 	"sync"
 	"time"
+	"timeseries-go/blinkhash"
 )
 
 func Test() {

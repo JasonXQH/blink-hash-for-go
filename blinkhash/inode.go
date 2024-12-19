@@ -20,7 +20,6 @@ func (in *INode) GetHighKey() interface{} {
 
 // NewINode 创建并初始化一个 INode 实例，适用于各种构造场景
 func NewINode(level int, highKey interface{}, sibling, left NodeInterface) *INode {
-	cardinality := INodeCardinality
 	inode := &INode{
 		Node: Node{
 			level:       level,
@@ -28,15 +27,14 @@ func NewINode(level int, highKey interface{}, sibling, left NodeInterface) *INod
 			leftmostPtr: left,
 		},
 		Type:        INNERNode,
-		Cardinality: cardinality,
+		Cardinality: INodeCardinality,
 		HighKey:     highKey,
-		Entries:     make([]Entry, cardinality),
+		Entries:     make([]Entry, INodeCardinality),
 	}
 	return inode
 }
 
 func NewINodeFromLeaves(node NodeInterface) *INode {
-	cardinality := INodeCardinality
 	inode := &INode{
 		Node: Node{
 			level:       node.GetLevel(),
@@ -44,7 +42,7 @@ func NewINodeFromLeaves(node NodeInterface) *INode {
 			leftmostPtr: node.GetLeftmostPtr(),
 		},
 		Type:        INNERNode,
-		Cardinality: cardinality,
+		Cardinality: INodeCardinality,
 		HighKey:     node.GetHighKey(),
 		Entries:     node.GetEntries(),
 	}
@@ -53,14 +51,13 @@ func NewINodeFromLeaves(node NodeInterface) *INode {
 
 // NewINodeSimple 传入 level 的简单构造函数
 func NewINodeForInsertInBatch(level int) *INode {
-	cardinality := INodeCardinality
 	return &INode{
 		Node: Node{
 			level: level,
 		},
 		Type:        INNERNode,
-		Cardinality: cardinality,
-		Entries:     make([]Entry, cardinality), // 初始化为空但有容量
+		Cardinality: INodeCardinality,
+		Entries:     make([]Entry, INodeCardinality), // 初始化为空但有容量
 	}
 }
 
@@ -73,9 +70,10 @@ func NewINodeForHeightGrowth(splitKey interface{}, left, right, sibling NodeInte
 			leftmostPtr: left,
 			count:       1, // 只有一个条目
 		},
-		Type:    INNERNode,
-		HighKey: highKey,
-		Entries: make([]Entry, 1), // 只有一个条目
+		Cardinality: INodeCardinality,
+		Type:        INNERNode,
+		HighKey:     highKey,
+		Entries:     make([]Entry, 1, INodeCardinality), // 只有一个条目
 	}
 	// 初始化条目
 	inode.Entries[0] = Entry{
@@ -86,7 +84,7 @@ func NewINodeForHeightGrowth(splitKey interface{}, left, right, sibling NodeInte
 }
 
 // NewINodeForSplit 用于节点分裂时的构造函数
-func NewINodeForSplit(sibling NodeInterface, count int, left NodeInterface, level int, highKey interface{}) *INode {
+func NewINodeForSplit(sibling NodeInterface, count int32, left NodeInterface, level int, highKey interface{}) *INode {
 	return &INode{
 		Node: Node{
 			siblingPtr:  sibling,
@@ -94,15 +92,16 @@ func NewINodeForSplit(sibling NodeInterface, count int, left NodeInterface, leve
 			count:       count,
 			level:       level,
 		},
-		Type:    INNERNode,
-		HighKey: highKey,
-		Entries: make([]Entry, count),
+		Type:        INNERNode,
+		Cardinality: INodeCardinality,
+		HighKey:     highKey,
+		Entries:     make([]Entry, count, INodeCardinality),
 	}
 }
 
 // IsFull 检查节点是否已满
 func (in *INode) IsFull() bool {
-	return in.count == cap(in.Entries)
+	return in.count == int32(in.Cardinality)
 }
 
 func (in *INode) GetNode() *Node {
@@ -121,7 +120,7 @@ func (in *INode) FindLowerBound(key interface{}) int {
 			return index - 1
 		}
 	}
-	return in.count - 1
+	return int(in.count - 1)
 }
 
 // ScanNode 根据提供的键扫描并返回对应的节点
@@ -139,14 +138,14 @@ func (in *INode) ScanNode(key interface{}) NodeInterface {
 
 		if highKeyInt < keyInt {
 			// 使用类型断言来检查 siblingPtr 是否实际上是 *Node 类型
-			if node, ok := in.siblingPtr.(*Node); ok {
+			if node, ok := in.siblingPtr.(NodeInterface); ok {
 				return node
 			}
 			return nil // 或其他错误处理
 		}
 	}
 	idx := in.FindLowerBound(key)
-	if idx >= 0 && idx < in.count {
+	if idx >= 0 && idx < int(in.count) {
 		if node, ok := in.Entries[idx].Value.(NodeInterface); ok {
 			return node
 		}
@@ -164,16 +163,24 @@ func (in *INode) Insert(key interface{}, value interface{}, version uint64) int 
 	pos := in.FindLowerBound(key)
 
 	// 确保 pos 不超过当前条目数
-	//if pos < 0 || pos > len(in.Entries) {
-	//	return fmt.Errorf("invalid insert position: %d", pos)
-	//}
+	if pos < -1 || pos >= int(in.count) {
+		panic(fmt.Sprintf("Insert: invalid position %d", pos))
+	}
+	if in.count >= int32(in.Cardinality) {
+		return NeedSplit
+	}
 
-	// 将后续元素向后移动一位
+	//// 将后续元素向后移动一位
 	in.Entries = append(in.Entries, Entry{}) // 扩展切片以防止越界
 	copy(in.Entries[pos+2:], in.Entries[pos+1:])
 	in.Entries[pos+1] = Entry{Key: key, Value: value}
 	// 更新计数
-	in.count++
+	in.IncrementCount()
+
+	//// Shift条目以腾出插入位置
+	//copy(in.Entries[pos+2:], in.Entries[pos+1:int(in.count)])
+	//in.Entries[pos+1] = Entry{Key: key, Value: value}
+	//in.IncrementCount()
 
 	// 更新 HighKey
 	if in.count > 0 {
@@ -200,8 +207,7 @@ func (in *INode) InsertWithLeft(key interface{}, value *Node, left *Node) error 
 	in.Entries[pos].Value = left // 设置左侧指针
 
 	// 增加节点计数
-	in.count++
-
+	in.IncrementCount()
 	// 更新 HighKey
 	if in.count > 0 {
 		in.HighKey = in.Entries[in.count-1].Key
@@ -213,14 +219,20 @@ func (in *INode) InsertWithLeft(key interface{}, value *Node, left *Node) error 
 // Split 分裂当前 INode 节点，返回新的节点和分裂键
 func (in *INode) Split(key interface{}, value interface{}, version uint64) (Splittable, interface{}) {
 	half := in.count / 2
+	//half := len(in.Entries)
 	splitKey := in.Entries[half].Key
 
 	// 创建新节点，容量为剩余条目数
 	newCount := in.count - half - 1
+	if newCount < 0 {
+		fmt.Println("newCount < 0 ,this should not happen!")
+		panic("newCount < 0 ,this should not happen!")
+	}
 	newNode := NewINodeForSplit(
 		in.siblingPtr,
 		newCount,
-		in.Entries[half].Value.(*Node),
+		//内部节点的孩子，也可能是内部节点
+		in.Entries[half].Value.(NodeInterface),
 		in.level,
 		in.HighKey,
 	)
@@ -229,7 +241,7 @@ func (in *INode) Split(key interface{}, value interface{}, version uint64) (Spli
 	copy(newNode.Entries, in.Entries[half+1:])
 
 	// 更新当前节点的 sibling 和 highKey
-	in.siblingPtr = &newNode.Node
+	in.siblingPtr = newNode
 	in.HighKey = splitKey
 	in.count = half
 
@@ -255,7 +267,7 @@ func (in *INode) BatchMigrate(migrate []Entry, migrateIdx int, migrateNum int) (
 
 	// 批量复制条目到当前节点
 	in.Entries = append(in.Entries[:in.count], migrate[migrateIdx:migrateIdx+copyNum]...)
-	in.count += copyNum
+	in.count += int32(copyNum)
 	migrateIdx += copyNum
 
 	return migrateIdx, nil
@@ -264,16 +276,16 @@ func (in *INode) BatchMigrate(migrate []Entry, migrateIdx int, migrateNum int) (
 // BatchKvPair 将键值对批量填充到 INode 的 Entries 中
 // 返回更新后的 idx, 是否达到 batchSize, 和错误（如果有）
 func (in *INode) BatchKvPair(keys []interface{}, values []NodeInterface, idx int, num int, batchSize int) (int, bool, error) {
-	for in.count < batchSize && idx < num-1 {
+	for int(in.count) < batchSize && idx < num-1 {
 		in.Entries = append(in.Entries, Entry{
 			Key:   keys[idx],
 			Value: values[idx],
 		})
-		in.count++
+		in.IncrementCount()
 		idx++
 	}
 
-	if in.count == batchSize {
+	if int(in.count) == batchSize {
 		if idx >= num {
 			return idx, false, fmt.Errorf("idx out of range when setting HighKey")
 		}
@@ -291,7 +303,7 @@ func (in *INode) BatchKvPair(keys []interface{}, values []NodeInterface, idx int
 		Key:   keys[idx],
 		Value: values[idx],
 	})
-	in.count++
+	in.IncrementCount()
 	idx++
 	return idx, false, nil
 }
@@ -299,16 +311,16 @@ func (in *INode) BatchKvPair(keys []interface{}, values []NodeInterface, idx int
 // BatchBuffer 将缓冲区中的键值对批量填充到 INode 的 Entries 中
 // 返回更新后的 bufIdx, 是否达到 batchSize, 和错误（如果有）
 func (in *INode) BatchBuffer(buf []Entry, bufIdx int, bufNum int, batchSize int) (int, bool, error) {
-	for in.count < batchSize && bufIdx < bufNum-1 {
+	for int(in.count) < batchSize && bufIdx < bufNum-1 {
 		in.Entries = append(in.Entries, Entry{
 			Key:   buf[bufIdx].Key,
 			Value: buf[bufIdx].Value,
 		})
-		in.count++
+		in.IncrementCount()
 		bufIdx++
 	}
 
-	if in.count == batchSize {
+	if int(in.count) == batchSize {
 		if bufIdx >= bufNum {
 			return bufIdx, false, fmt.Errorf("bufIdx out of range when setting HighKey")
 		}
@@ -326,12 +338,11 @@ func (in *INode) BatchBuffer(buf []Entry, bufIdx int, bufNum int, batchSize int)
 		Key:   buf[bufIdx].Key,
 		Value: buf[bufIdx].Value,
 	})
-	in.count++
+	in.IncrementCount()
 	bufIdx++
 	return bufIdx, false, nil
 }
 
-// BatchInsertLastLevelWithMigrationAndMovement 批量插入到叶子节点，包括迁移和缓冲区处理
 // BatchInsertLastLevelWithMigrationAndMovement 批量插入到叶子节点，包括迁移和缓冲区处理
 // 返回更新后的 migrateIdx, bufIdx 和错误（如果有）
 func (in *INode) BatchInsertLastLevelWithMigrationAndMovement(
@@ -352,7 +363,7 @@ func (in *INode) BatchInsertLastLevelWithMigrationAndMovement(
 	}
 
 	// 如果还有键值对需要插入，并且当前节点未满
-	if idx < num && in.count < batchSize {
+	if idx < num && int(in.count) < batchSize {
 		if fromStart {
 			// 从头开始插入，更新 leftmost_ptr
 			in.leftmostPtr = values[idx]
@@ -372,7 +383,7 @@ func (in *INode) BatchInsertLastLevelWithMigrationAndMovement(
 			}
 
 			// 处理边界情况：插入完成但需要从缓冲区处理
-			if idx == num && in.count == batchSize && bufNum != 0 {
+			if idx == num && int(in.count) == batchSize && bufNum != 0 {
 				if bufIdx >= bufNum {
 					return migrateIdx, bufIdx, fmt.Errorf("bufIdx out of range when setting HighKey")
 				}
@@ -383,7 +394,7 @@ func (in *INode) BatchInsertLastLevelWithMigrationAndMovement(
 	}
 
 	// 如果还有缓冲区条目需要插入，并且当前节点未满
-	if bufIdx < bufNum && in.count < batchSize {
+	if bufIdx < bufNum && int(in.count) < batchSize {
 		if fromStart {
 			// 从缓冲区开始插入，更新 leftmost_ptr
 			in.leftmostPtr = buf[bufIdx].Value.(*Node)
@@ -427,7 +438,7 @@ func (in *INode) BatchInsertLastLevelWithMovement(
 			}
 
 			// 如果达到批量大小，设置 HighKey 并退出
-			if idx == num && in.count == batchSize && bufNum != 0 {
+			if idx == num && int(in.count) == batchSize && bufNum != 0 {
 				if bufIdx >= bufNum {
 					return idx, bufIdx, fmt.Errorf("bufIdx out of range when setting HighKey")
 				}
@@ -438,7 +449,7 @@ func (in *INode) BatchInsertLastLevelWithMovement(
 	}
 
 	// Step 2: 从缓冲区插入条目
-	if bufIdx < bufNum && in.count < batchSize {
+	if bufIdx < bufNum && int(in.count) < batchSize {
 		if fromStart {
 			// 从缓冲区开始插入，更新 leftmost_ptr
 			in.leftmostPtr = buf[bufIdx].Value.(*Node)
@@ -460,13 +471,13 @@ func (in *INode) BatchInsertLastLevelWithMovement(
 func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]*INode, error) {
 	pos := in.FindLowerBound(keys[0])
 	batchSizeCalc := int(float64(in.Cardinality) * FillFactor)
-	inplace := (in.count + num) < in.Cardinality
+	inplace := (int(in.count) + num) < in.Cardinality
 	moveNum := 0
 	idx := 0
 	if pos < 0 {
-		moveNum = in.count
+		moveNum = int(in.count)
 	} else {
-		moveNum = in.count - pos - 1
+		moveNum = int(in.count) - pos - 1
 	}
 
 	if inplace { // 正常插入
@@ -481,7 +492,7 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 			in.Entries[i].Key = keys[j]
 			in.Entries[i].Value = values[j]
 		}
-		in.count += num
+		in.count += int32(num)
 		return nil, nil
 	}
 	// 需要数据迁移和可能的分裂
@@ -500,7 +511,7 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 
 		buf := make([]Entry, moveNum)
 		copy(buf, in.Entries[pos+1:pos+1+moveNum])
-		in.count = batchSizeCalc
+		in.count = int32(batchSizeCalc)
 
 		totalNum := num + moveNum + migrateNum
 		newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
@@ -547,8 +558,8 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 			in.Entries[i].Key = keys[idx]
 			in.Entries[i].Value = values[idx]
 		}
-		in.count += idx - moveNum - 1
-		for ; in.count < batchSizeCalc; in.count, moveIdx = in.count+1, moveIdx+1 {
+		in.count += int32(idx - moveNum - 1)
+		for ; int(in.count) < batchSizeCalc; in.count, moveIdx = in.count+1, moveIdx+1 {
 			in.Entries[in.count].Key = buf[moveIdx].Key
 			in.Entries[in.count].Value = buf[moveIdx].Value
 		}
@@ -627,7 +638,7 @@ func (in *INode) InsertForRoot(keys []interface{}, values []NodeInterface, left 
 			Key:   keys[i],
 			Value: values[i],
 		})
-		in.count++
+		in.IncrementCount()
 	}
 }
 
@@ -668,8 +679,8 @@ func (in *INode) Print() {
 
 func (in *INode) SanityCheck(prevHighKey interface{}, first bool) {
 	// 检查键的顺序是否正确
-	for i := 0; i < in.count-1; i++ {
-		for j := i + 1; j < in.count; j++ {
+	for i := 0; i < int(in.count)-1; i++ {
+		for j := i + 1; j < int(in.count); j++ {
 			if in.Entries[i].Key.(int) > in.Entries[j].Key.(int) {
 				fmt.Printf("INode: Key order is not preserved!!\n")
 				fmt.Printf("[%d].Key: %v\t[%d].Key: %v at node %p\n", i, in.Entries[i].Key, j, in.Entries[j].Key, in)
@@ -678,7 +689,7 @@ func (in *INode) SanityCheck(prevHighKey interface{}, first bool) {
 	}
 
 	// 检查每个键是否符合 highKey 和 prevHighKey 的约束
-	for i := 0; i < in.count; i++ {
+	for i := 0; i < int(in.count); i++ {
 		if in.siblingPtr != nil && in.Entries[i].Key.(int) > in.HighKey.(int) {
 			fmt.Printf("INode: %d (%v) is higher than high key %v at node %p\n", i, in.Entries[i].Key, in.HighKey, in)
 		}
@@ -716,7 +727,7 @@ func (in *INode) BatchInsertWithMigrationAndMovement(
 	}
 
 	// 如果还有键值对需要插入，并且当前节点未满
-	if idx < num && in.count < batchSize {
+	if idx < num && int(in.count) < batchSize {
 		if fromStart {
 			in.leftmostPtr = values[idx]
 			idx++
@@ -733,7 +744,7 @@ func (in *INode) BatchInsertWithMigrationAndMovement(
 			if reached {
 				return migrateIdx, bufIdx, nil // 如果达到批量大小，直接返回
 			}
-			if idx == num && in.count == batchSize && bufNum != 0 {
+			if idx == num && int(in.count) == batchSize && bufNum != 0 {
 				if bufIdx >= bufNum {
 					return migrateIdx, bufIdx, fmt.Errorf("bufIdx out of range when setting HighKey")
 				}
@@ -743,7 +754,7 @@ func (in *INode) BatchInsertWithMigrationAndMovement(
 	}
 
 	// 如果还有缓冲区条目需要插入，并且当前节点未满
-	if bufIdx < bufNum && in.count < batchSize {
+	if bufIdx < bufNum && int(in.count) < batchSize {
 		if fromStart {
 			in.leftmostPtr = buf[bufIdx].Value.(*Node)
 			bufIdx++
@@ -782,7 +793,7 @@ func (in *INode) BatchInsertWithMovement(
 			if reached {
 				return idx, bufIdx, nil
 			}
-			if idx == num && in.count == batchSize && bufNum != 0 {
+			if idx == num && int(in.count) == batchSize && bufNum != 0 {
 				if bufIdx >= bufNum {
 					return idx, bufIdx, fmt.Errorf("bufIdx out of range when setting HighKey")
 				}
@@ -792,7 +803,7 @@ func (in *INode) BatchInsertWithMovement(
 	}
 
 	// 从缓冲区插入键值对
-	if bufIdx < bufNum && in.count < batchSize {
+	if bufIdx < bufNum && int(in.count) < batchSize {
 		if fromStart {
 			in.leftmostPtr = buf[bufIdx].Value.(*Node)
 			bufIdx++
@@ -815,14 +826,14 @@ func (in *INode) BatchInsert(
 ) ([]*INode, error) {
 	pos := in.FindLowerBound(keys[0])
 	batchSize := int(float64(in.Cardinality) * FillFactor)
-	inPlace := (in.count + num) < in.Cardinality
+	inPlace := (int(in.count) + num) < in.Cardinality
 	moveNum := 0
 	idx := 0
 
 	if pos < 0 {
-		moveNum = in.count
+		moveNum = int(in.count)
 	} else {
-		moveNum = in.count - pos - 1
+		moveNum = int(in.count) - pos - 1
 	}
 
 	// Case 1: Insert in-place
@@ -831,7 +842,7 @@ func (in *INode) BatchInsert(
 		for i, j := pos+1, 0; j < num; i, j = i+1, j+1 {
 			in.Entries[i] = Entry{Key: keys[j], Value: values[j]}
 		}
-		in.count += num
+		in.count += int32(num)
 		in.HighKey = keys[num-1]
 		return nil, nil
 	}
@@ -849,7 +860,7 @@ func (in *INode) BatchInsert(
 		copy(bufEntries, in.Entries[pos+1:pos+1+moveNum])
 
 		// Adjust current node
-		in.count = batchSize
+		in.count = int32(batchSize)
 
 		// Calculate new nodes needed
 		totalNum := num + moveNum + migrateNum
@@ -912,13 +923,13 @@ func (in *INode) BatchInsert(
 		in.Entries[i] = Entry{Key: keys[idx], Value: values[idx]}
 	}
 
-	in.count += (idx - moveNum)
-	for in.count < batchSize && moveIdx < moveNum {
-		if len(in.Entries) <= in.count {
+	in.count += int32(idx - moveNum)
+	for int(in.count) < batchSize && moveIdx < moveNum {
+		if len(in.Entries) <= int(in.count) {
 			in.Entries = append(in.Entries, Entry{}) // Expanding the slice if needed
 		}
 		in.Entries[in.count] = bufEntries[moveIdx]
-		in.count++
+		in.IncrementCount()
 		moveIdx++
 	}
 
@@ -983,4 +994,7 @@ func (n *INode) GetEntries() []Entry {
 }
 func (n *INode) GetType() NodeType {
 	return INNERNode
+}
+func (n *INode) GetCardinality() int {
+	return n.Cardinality
 }

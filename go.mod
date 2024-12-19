@@ -1,4 +1,4 @@
-module 2024-11-timeseries-go
+module timeseries-go
 
 go 1.19
 

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"2024-11-timeseries-go/test"
 	"os"
+	"timeseries-go/test"
 )
 
 //TIP To run your code, right-click the code and select <b>Run</b>. Alternatively, click
@@ -10,7 +10,7 @@ import (
 
 func main() {
 	// 模拟命令行参数
-	os.Args = append(os.Args, "100", "1", "50") // 比如 num_data=10000, num_threads=4, insert_ratio=50
+	os.Args = append(os.Args, "1000", "1", "50") // 比如 num_data=10000, num_threads=4, insert_ratio=50
 	//var _ blinkhash.INodeInterface = (*blinkhash.LNodeHash)(nil)
 	test.InsertTest()
 	// 调用 MixedTest

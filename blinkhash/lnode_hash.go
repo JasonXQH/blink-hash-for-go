@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"runtime"
 	"sort"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -48,7 +49,7 @@ func NewLNodeHash(level int) *LNodeHash {
 }
 
 // NewLNodeHashWithSibling 创建一个新的 LNodeHash 节点，并设置兄弟节点、计数和层级
-func NewLNodeHashWithSibling(sibling NodeInterface, count, level int) *LNodeHash {
+func NewLNodeHashWithSibling(sibling NodeInterface, count int32, level int) *LNodeHash {
 	cardinality := LNodeHashCardinality
 	newHashNode := &LNodeHash{
 		Node: Node{
@@ -191,7 +192,6 @@ func (lh *LNodeHash) Hash(key interface{}) uint8 {
 
 func (lh *LNodeHash) Insert(key interface{}, value interface{}, version uint64) int {
 	//fmt.Println("我是LNodeHash，调用Insert")
-
 	// 根据 FINGERPRINT 设置初始化 empty
 	for k := 0; k < HashFuncsNum; k++ {
 		hashKey := h(key, k, 0) // 使用默认 seed
@@ -232,7 +232,9 @@ func (lh *LNodeHash) Insert(key interface{}, value interface{}, version uint64) 
 
 			if success {
 				lh.Buckets[loc].Unlock()
-				return InsertSuccess // 返回 0
+				// 成功插入后递增计数
+				atomic.AddInt32(&lh.count, 1) // 假设 Count 是 int32 类型
+				return InsertSuccess          // 返回 0
 			}
 
 			// 插入失败，解锁并继续
@@ -257,7 +259,7 @@ func (lh *LNodeHash) Insert(key interface{}, value interface{}, version uint64) 
 // 分裂函数
 func (lh *LNodeHash) Split(key interface{}, value interface{}, version uint64) (Splittable, interface{}) {
 
-	newRight := NewLNodeHashWithSibling(lh.siblingPtr, lh.count, lh.level)
+	newRight := NewLNodeHashWithSibling(lh.siblingPtr, 0, lh.level)
 	// 初始化newRight的buckets
 	newRight.HighKey = lh.HighKey
 	newRight.LeftSiblingPtr = lh
@@ -318,6 +320,9 @@ func (lh *LNodeHash) Split(key interface{}, value interface{}, version uint64) (
 						newRight.Buckets[j].fingerprints[i] = lh.Buckets[j].fingerprints[i]
 						lh.Buckets[j].fingerprints[i] = 0
 						lh.Buckets[j].entries[i] = Entry{Key: nil, Value: nil}
+						// 更新 count
+						lh.DecrementCount()
+						newRight.IncrementCount()
 					}
 				}
 			}
@@ -330,6 +335,9 @@ func (lh *LNodeHash) Split(key interface{}, value interface{}, version uint64) (
 				if !IsEmptyKey(e.Key) && e.Key.(int) > medianKey.(int) {
 					newRight.Buckets[j].entries[i] = e
 					lh.Buckets[j].entries[i] = Entry{Key: nil, Value: nil}
+					// 更新 count
+					lh.DecrementCount()
+					newRight.IncrementCount()
 				}
 			}
 		}
@@ -370,6 +378,8 @@ InsertLoop:
 										targetNode.Buckets[loc].entries[i].Key = key
 										targetNode.Buckets[loc].entries[i].Value = value
 										needInsert = false
+										// 更新 count
+										lh.IncrementCount()
 									} else {
 										// 重置迁移key的fingerprint
 										targetNode.Buckets[loc].fingerprints[i] = 0
@@ -386,6 +396,7 @@ InsertLoop:
 										newRight.Buckets[loc].entries[i].Key = key
 										newRight.Buckets[loc].entries[i].Value = value
 										needInsert = false
+										lh.IncrementCount()
 									}
 								}
 							}
@@ -397,13 +408,16 @@ InsertLoop:
 									newRight.Buckets[loc].fingerprints[i] = uint8(targets[m].fingerprint)
 									newRight.Buckets[loc].entries[i].Key = key
 									newRight.Buckets[loc].entries[i].Value = value
+									lh.IncrementCount()
 								} else {
 									// 插入到当前
 									targetNode.Buckets[loc].fingerprints[i] = uint8(targets[m].fingerprint)
 									targetNode.Buckets[loc].entries[i].Key = key
 									targetNode.Buckets[loc].entries[i].Value = value
+									lh.IncrementCount()
 								}
 								needInsert = false
+
 							}
 						}
 					}
@@ -415,6 +429,7 @@ InsertLoop:
 							targetNode.Buckets[loc].entries[i].Key = key
 							targetNode.Buckets[loc].entries[i].Value = value
 							needInsert = false
+							lh.IncrementCount()
 							break InsertLoop
 						}
 					}
@@ -430,12 +445,17 @@ InsertLoop:
 								// 插入到newRight
 								newRight.Buckets[loc].entries[i].Key = key
 								newRight.Buckets[loc].entries[i].Value = value
+								needInsert = false
+								newRight.IncrementCount()
 							} else {
 								targetNode.Buckets[loc].entries[i].Key = key
 								targetNode.Buckets[loc].entries[i].Value = value
+								needInsert = false
+								lh.IncrementCount()
 							}
 							needInsert = false
 							break InsertLoop
+
 						} else {
 							// occupied slot，如果需要迁移参考C++逻辑，这里省略详细迁移步骤
 							//（若需要完整迁移逻辑，请参考上面FINGERPRINT+LINKED的迁移思路）
@@ -448,6 +468,7 @@ InsertLoop:
 							targetNode.Buckets[loc].entries[i].Key = key
 							targetNode.Buckets[loc].entries[i].Value = value
 							needInsert = false
+							lh.IncrementCount()
 							break InsertLoop
 						}
 					}
@@ -468,14 +489,14 @@ InsertLoop:
 		fmt.Printf("insert after split failed -- key: %v\n", key)
 	}
 
-	if !LINKED {
-		//Test
-		newRight.Cardinality = len(newRight.Buckets)
-		if newRight.siblingPtr == nil {
-			util := newRight.Utilization() * 100
-			fmt.Printf("util: %.2f%%\n", util)
-		}
-	}
+	//if !LINKED {
+	//Test
+	//newRight.Cardinality = len(newRight.Buckets)
+	//if newRight.siblingPtr == nil {
+	//util := newRight.Utilization() * 100
+	//fmt.Printf("util: %.2f%%\n", util)
+	//}
+	//}
 
 	return newRight, splitKey
 }
@@ -996,7 +1017,7 @@ func (lh *LNodeHash) StabilizeBucket(loc int) bool {
 		} else {
 			fmt.Printf("[StabilizeBucket]: something wrong!\n")
 			fmt.Printf("\t current bucket state: %v, \t left bucket state: %v\n", lh.Buckets[loc].state, leftBucket.state)
-			leftBucket.unlock()
+			leftBucket.Unlock()
 			return false
 		}
 
@@ -1247,6 +1268,9 @@ func (lh *LNodeHash) GetEntries() []Entry {
 }
 func (lh *LNodeHash) GetType() NodeType {
 	return HashNode
+}
+func (lh *LNodeHash) GetCardinality() int {
+	return lh.Cardinality
 }
 
 // Footprint 计算哈希叶子节点的内存占用。

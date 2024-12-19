@@ -50,7 +50,7 @@ func NewLNodeBTreeWithLevel(level int) *LNodeBTree {
 }
 
 // NewLNodeBTreeWithSibling 创建一个新的 LNodeBTree 节点，并设置兄弟节点、计数和层级
-func NewLNodeBTreeWithSibling(sibling NodeInterface, count, level int) *LNodeBTree {
+func NewLNodeBTreeWithSibling(sibling NodeInterface, count int32, level int) *LNodeBTree {
 	cardinality := LNodeBTreeCardinality
 	return &LNodeBTree{
 		Node: Node{
@@ -95,8 +95,9 @@ func (lb *LNodeBTree) Print() {
 func (lb *LNodeBTree) SanityCheck(_highKey interface{}, first bool) {
 	fmt.Printf("我是LNodeBTree 调用 SanityCheck:\n")
 	// 检查键值是否有序
-	for i := 0; i < lb.count-1; i++ {
-		for j := i + 1; j < lb.count; j++ {
+	count := int(lb.count)
+	for i := 0; i < count-1; i++ {
+		for j := i + 1; j < count; j++ {
 			keyInt, ok := lb.Entries[i].Key.(int)
 			if !ok {
 				fmt.Printf("Error: Entry key is not an int: %v\n", lb.Entries[i].Key)
@@ -116,7 +117,7 @@ func (lb *LNodeBTree) SanityCheck(_highKey interface{}, first bool) {
 	}
 
 	// 检查 sibling 和 highKey 的关系
-	for i := 0; i < lb.count; i++ {
+	for i := 0; i < count; i++ {
 		entryKey, ok1 := lb.Entries[i].Key.(int)
 		highKeyInt, ok2 := lb.HighKey.(int)
 		if !ok1 || !ok2 {
@@ -160,19 +161,19 @@ func (lb *LNodeBTree) Split(key interface{}, value interface{}, version uint64) 
 		panic("Split: cannot split a node with zero entries")
 	}
 	splitKey := lb.Entries[half-1].Key // 确定拆分键
-	newCnt := len(lb.Entries) - half
+	newCnt := int32(len(lb.Entries) - half)
 	// 创建新的兄弟节点
 	newLeaf := NewLNodeBTreeWithSibling(lb.siblingPtr, newCnt, lb.level)
 	newLeaf.HighKey = lb.HighKey
 
 	// 拷贝后半部分到新叶节点
-	copy(newLeaf.Entries, lb.Entries[half:half+newCnt])
+	copy(newLeaf.Entries, lb.Entries[half:half+int(newCnt)])
 	newLeaf.count = newCnt
 
 	// 更新当前节点
 	lb.siblingPtr = newLeaf
 	lb.HighKey = splitKey
-	lb.count = half
+	lb.count = int32(half)
 	lb.Entries = lb.Entries[:half]
 	// 根据键值确定插入位置
 	if compareIntKeys(splitKey, key) < 0 {
@@ -336,7 +337,7 @@ func (lb *LNodeBTree) findPosLinear(key interface{}) int {
 func (lb *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int, searchRange int, continued bool) int {
 	currentCount := count // 使用一个单独的变量跟踪填充数量
 	if continued {
-		for i := 0; i < lb.count; i++ {
+		for i := 0; i < int(lb.count); i++ {
 			*buf = append(*buf, lb.Entries[i].Value)
 			currentCount++
 			if currentCount == searchRange {
@@ -347,7 +348,7 @@ func (lb *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int
 	} else {
 		pos := lb.FindLowerBound(key)
 		// 从 pos 开始，注意 pos + 1 是否合理，取决于具体需求
-		for i := pos + 1; i < lb.count; i++ {
+		for i := pos + 1; i < int(lb.count); i++ {
 			*buf = append(*buf, lb.Entries[i].Value)
 			currentCount++
 			if currentCount == searchRange {
@@ -482,11 +483,11 @@ func (lb *LNodeBTree) batchInsert(buf []Entry, batchSize int, from *int, to int)
 	if *from+batchSize < to {
 		lb.Entries = append(lb.Entries, buf[*from:*from+batchSize]...)
 		*from += batchSize
-		lb.count += batchSize
+		lb.count += int32(batchSize)
 	} else {
 		// 否则只拷贝 (to - from) 个条目
 		lb.Entries = append(lb.Entries, buf[*from:to]...)
-		lb.count += (to - *from)
+		lb.count += int32(to - *from)
 		*from = to
 	}
 	// 更新 HighKey
@@ -496,7 +497,7 @@ func (lb *LNodeBTree) batchInsert(buf []Entry, batchSize int, from *int, to int)
 // BatchInsert 批量插入条目到 B-tree 节点
 func (lb *LNodeBTree) BatchInsert(entries []Entry) {
 	lb.Entries = append(lb.Entries, entries...)
-	lb.count += len(entries)
+	lb.count += int32(len(entries))
 	if lb.count > 0 {
 		lb.HighKey = lb.Entries[lb.count-1].Key
 	}
@@ -506,7 +507,7 @@ func (lb *LNodeBTree) BatchInsert(entries []Entry) {
 func (lb *LNodeBTree) Footprint(metrics *FootprintMetrics) {
 	// 实现具体的内存占用计算逻辑
 	cnt := lb.count
-	invalidNum := lb.Cardinality - cnt
+	invalidNum := lb.Cardinality - int(cnt)
 	metrics.KeyDataOccupied += uint64(unsafe.Sizeof(Entry{})) * uint64(cnt)
 	metrics.KeyDataUnoccupied += uint64(unsafe.Sizeof(Entry{})) * uint64(invalidNum)
 
@@ -522,4 +523,8 @@ func (lb *LNodeBTree) GetType() NodeType {
 
 func (lb *LNodeBTree) GetEntries() []Entry {
 	return lb.Entries
+}
+
+func (lb *LNodeBTree) GetCardinality() int {
+	return lb.Cardinality
 }

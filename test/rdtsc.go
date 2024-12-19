@@ -1,10 +1,10 @@
 package test
 
 import (
-	"2024-11-timeseries-go/blinkhash"
 	"fmt"
 	"os"
 	"time"
+	"timeseries-go/blinkhash"
 )
 
 const (

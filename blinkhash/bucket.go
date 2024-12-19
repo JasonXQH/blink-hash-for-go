@@ -42,9 +42,13 @@ func (b *Bucket) TryLock() bool {
 }
 
 func (b *Bucket) Unlock() {
+	// 检查当前节点是否上锁，如果没有锁定，则直接返回
+	version := atomic.LoadUint32(&b.lock)
+	if !b.IsLocked(version) {
+		return // 如果没有锁定，就不执行解锁操作
+	}
 	atomic.AddUint32(&b.lock, 0b10)
 }
-
 func (b *Bucket) Insert(key, value interface{}) bool {
 	for i := range b.entries {
 		if b.entries[i].Key == nil { // assuming nil as empty
@@ -349,12 +353,12 @@ func (b *Bucket) upgradeLock(version uint32) bool {
 	}
 }
 
-func (b *Bucket) unlock() {
-	atomic.AddUint32(&b.lock, 0b10)
-}
-
 func (b *Bucket) getVersion() (version uint32, needRestart bool) {
 	version = atomic.LoadUint32(&b.lock)
 	needRestart = b.isLocked(version)
 	return
+}
+
+func (b *Bucket) IsLocked(version uint32) bool {
+	return (version & 0b10) == 0b10
 }

@@ -11,7 +11,7 @@ type Node struct {
 	lock        uint64
 	siblingPtr  NodeInterface
 	leftmostPtr NodeInterface
-	count       int
+	count       int32
 	level       int
 }
 
@@ -23,7 +23,7 @@ func (n *Node) GetType() NodeType {
 	return BASENode
 }
 
-func (n *Node) GetCount() int {
+func (n *Node) GetCount() int32 {
 	return n.count
 }
 
@@ -72,7 +72,7 @@ func NewNode(level int) *Node {
 }
 
 // NewNodeWithSiblings 创建一个新的 Node 实例并初始化相关的指针和计数器
-func NewNodeWithSiblings(sibling, left NodeInterface, count, level int) *Node {
+func NewNodeWithSiblings(sibling, left NodeInterface, count int32, level int) *Node {
 	return &Node{
 		siblingPtr:  sibling,
 		leftmostPtr: left,
@@ -107,10 +107,6 @@ func (n *Node) GetVersion() (uint64, bool) {
 	return version, needRestart
 }
 
-func (n *Node) GetCnt() int {
-	return n.count
-}
-
 // TryReadLock 尝试进行读锁定
 func (n *Node) TryReadLock() (uint64, bool) {
 	version := atomic.LoadUint64(&n.lock)
@@ -140,6 +136,12 @@ func (n *Node) TryWriteLock() bool {
 
 // WriteUnlock 释放写锁
 func (n *Node) WriteUnlock() {
+	// 检查当前节点是否上锁，如果没有锁定，则直接返回
+	version := atomic.LoadUint64(&n.lock)
+	if !n.IsLocked(version) {
+		return // 如果没有锁定，就不执行解锁操作
+	}
+	// 如果已上锁，释放写锁
 	atomic.AddUint64(&n.lock, 0b10)
 }
 
@@ -174,4 +176,11 @@ func (n *Node) TryUpgradeWriteLock(version uint64) (bool, bool) {
 		needRestart = true
 	}
 	return !needRestart, needRestart
+}
+func (n *Node) IncrementCount() {
+	atomic.AddInt32(&n.count, 1)
+}
+
+func (n *Node) DecrementCount() {
+	atomic.AddInt32(&n.count, -1)
 }

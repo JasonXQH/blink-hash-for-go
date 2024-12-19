@@ -87,11 +87,11 @@ const (
 //const (
 //	LNodeHashCardinality  = (LeafHashSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Bucket{}))
 //	LNodeBTreeCardinality = (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
-//	INodeCardinality 	  = int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
+//	INodeCardinality      = int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
 //	EntryNum              = 32
 //	PageSize              = 512 // 示例页大小，具体值应根据实际情况调整
-//	HashFuncsNum     	  = 2
-//	NumSlot           	  = 4
+//	HashFuncsNum          = 2
+//	NumSlot               = 4
 //)
 
 // dev

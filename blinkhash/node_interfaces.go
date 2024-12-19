@@ -3,7 +3,7 @@ package blinkhash
 type NodeType int
 
 type NodeInterface interface {
-	GetCount() int
+	GetCount() int32
 	GetLevel() int
 	GetLock() uint64
 	Print()
@@ -16,11 +16,16 @@ type NodeInterface interface {
 	GetHighKey() interface{}
 	SanityCheck(prevHighKey interface{}, first bool)
 	GetType() NodeType
+	TryUpgradeWriteLock(version uint64) (bool, bool)
+	IncrementCount()
+	DecrementCount()
 	EntryGetter
 }
 
 type INodeInterface interface {
 	NodeInterface
+	BatchInsertable
+	CardinalityGetter
 	Insertable
 	Splittable
 	NodeGetter
@@ -49,6 +54,7 @@ type LeafNodeInterface interface {
 	Utilizer
 	NodeGetter
 	FootPrinter
+	CardinalityGetter
 }
 
 // Insertable 接口定义插入方法
@@ -103,4 +109,12 @@ type FullJudger interface {
 
 type EntryGetter interface {
 	GetEntries() []Entry
+}
+type CardinalityGetter interface {
+	GetCardinality() int
+}
+
+type BatchInsertable interface {
+	BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]*INode, error)
+	BatchInsert(keys []interface{}, values []NodeInterface, num int) ([]*INode, error)
 }

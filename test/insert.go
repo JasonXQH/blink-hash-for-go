@@ -1,11 +1,11 @@
 package test
 
 import (
-	"2024-11-timeseries-go/blinkhash"
 	"fmt"
 	"os"
 	"sync"
 	"time"
+	"timeseries-go/blinkhash"
 )
 
 func InsertTest() {
@@ -39,7 +39,7 @@ func InsertTest() {
 		for i := from; i < to; i++ {
 			tree.Insert(keys[i], Value_t(keys[i]), ti)
 		}
-		tree.PrintTree()
+		//tree.PrintTree()
 
 	}
 
