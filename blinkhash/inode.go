@@ -217,7 +217,7 @@ func (in *INode) InsertWithLeft(key interface{}, value *Node, left *Node) error 
 }
 
 // Split 分裂当前 INode 节点，返回新的节点和分裂键
-func (in *INode) Split(key interface{}, value interface{}, version uint64) (Splittable, interface{}) {
+func (in *INode) Split() (INodeInterface, interface{}) {
 	half := in.count / 2
 	//half := len(in.Entries)
 	splitKey := in.Entries[half].Key

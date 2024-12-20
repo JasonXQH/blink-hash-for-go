@@ -27,7 +27,7 @@ type INodeInterface interface {
 	BatchInsertable
 	CardinalityGetter
 	Insertable
-	Splittable
+	INodeSplit
 	NodeGetter
 	NodeScanner
 	FullJudger
@@ -65,6 +65,11 @@ type Insertable interface {
 // Splittable 接口定义分裂方法
 type Splittable interface {
 	Split(key interface{}, value interface{}, version uint64) (Splittable, interface{})
+}
+
+// INodeSplit 接口定义分裂方法
+type INodeSplit interface {
+	Split() (INodeInterface, interface{})
 }
 
 // Updatable 接口定义更新方法

@@ -210,8 +210,7 @@ insertLoop: // 标签
 					}
 
 					// Internal node split.
-					splittableNode, newSplitKey := oldParent.Split(key, value, oldParent.GetLock())
-					newParent := splittableNode.(INodeInterface)
+					newParent, newSplitKey := oldParent.Split()
 					if compareIntKeys(splitKey, newSplitKey) <= 0 {
 						oldParent.Insert(splitKey, newLeafNode, oldParent.GetLock())
 					} else {
@@ -337,8 +336,7 @@ func (bt *BTree) insertKey(key interface{}, value NodeInterface, prev NodeInterf
 			return
 		} else {
 			// 父节点分裂
-			splittableNode, splitKey := parent.Split(key, value, 0)
-			newParent, ok := splittableNode.(INodeInterface)
+			newParent, splitKey := parent.Split()
 			if !ok {
 				panic("newParentSplittableInterface cannot be INode")
 
@@ -1239,18 +1237,18 @@ func printNode(n NodeInterface, prefix string, isTail bool) {
 
 	case HashNode:
 		// LNodeHash：有Buckets，每个Bucket中有entries
-		ln := n.(*LNodeHash)
-		for bIndex, bucket := range ln.Buckets {
-			isBucketLast := (bIndex == len(ln.Buckets)-1)
-			newPrefix := prefix + nextLevelPrefix(isTail)
-			fmt.Printf("%s%s Bucket #%d [state=%v]\n", newPrefix, leafConnector(isBucketLast), bIndex, bucket.state)
-			// 打印 Bucket 内的 entries
-			for eIndex, entry := range bucket.entries {
-				isEntryLast := (eIndex == len(bucket.entries)-1)
-				entryPrefix := newPrefix + nextLevelPrefix(isBucketLast)
-				fmt.Printf("%s%s Entry: %v\n", entryPrefix, leafConnector(isEntryLast), entry.Key)
-			}
-		}
+		//ln := n.(*LNodeHash)
+		//for bIndex, bucket := range ln.Buckets {
+		//	isBucketLast := (bIndex == len(ln.Buckets)-1)
+		//	newPrefix := prefix + nextLevelPrefix(isTail)
+		//	fmt.Printf("%s%s Bucket #%d [state=%v]\n", newPrefix, leafConnector(isBucketLast), bIndex, bucket.state)
+		//	// 打印 Bucket 内的 entries
+		//	for eIndex, entry := range bucket.entries {
+		//		isEntryLast := (eIndex == len(bucket.entries)-1)
+		//		entryPrefix := newPrefix + nextLevelPrefix(isBucketLast)
+		//		fmt.Printf("%s%s Entry: %v\n", entryPrefix, leafConnector(isEntryLast), entry.Key)
+		//	}
+		//}
 
 	default:
 		// 其他未识别类型，不做特殊处理

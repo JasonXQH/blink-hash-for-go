@@ -39,7 +39,6 @@ func InsertTest() {
 		for i := from; i < to; i++ {
 			tree.Insert(keys[i], Value_t(keys[i]), ti)
 		}
-		//tree.PrintTree()
 
 	}
 
@@ -56,6 +55,7 @@ func InsertTest() {
 	insertWg.Wait()
 	elapsed := time.Since(start)
 
+	tree.PrintTree()
 	fmt.Printf("Elapsed time: %.2f usec\n", float64(elapsed.Microseconds()))
 	fmt.Printf("Throughput: %.2f ops/sec\n", float64(half)/elapsed.Seconds())
 	fmt.Printf("Throughput: %.2f mops/sec\n", float64(half)/elapsed.Seconds()/1e6)
