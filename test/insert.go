@@ -38,6 +38,7 @@ func InsertTest() {
 		defer insertWg.Done()
 		for i := from; i < to; i++ {
 			tree.Insert(keys[i], Value_t(keys[i]), ti)
+			//tree.PrintTree()
 		}
 
 	}

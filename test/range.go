@@ -75,10 +75,9 @@ func RangeTest() {
 			to = numData
 		}
 
-		buf := make([]interface{}, Range)
 		for i := from; i < to; i++ {
 			ti := blinkhash.NewThreadInfo(tree.GetEpoche())
-			_ = tree.RangeLookup(keys[i], Range, buf, ti)
+			_ = tree.RangeLookup(keys[i], Range, ti)
 		}
 	}
 

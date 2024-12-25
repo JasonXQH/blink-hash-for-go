@@ -17,6 +17,9 @@ type INode struct {
 func (in *INode) GetHighKey() interface{} {
 	return in.HighKey
 }
+func (in *INode) SetHighKey(key interface{}) {
+	in.HighKey = key
+}
 
 // NewINode 创建并初始化一个 INode 实例，适用于各种构造场景
 func NewINode(level int, highKey interface{}, sibling, left NodeInterface) *INode {
@@ -62,7 +65,7 @@ func NewINodeForInsertInBatch(level int) *INode {
 }
 
 // NewINodeForHeightGrowth 用于树高度增加时的构造函数
-func NewINodeForHeightGrowth(splitKey interface{}, left, right, sibling NodeInterface, level int, highKey interface{}) *INode {
+func NewINodeForHeightGrowth(key interface{}, left, right, sibling NodeInterface, level int, highKey interface{}) *INode {
 	inode := &INode{
 		Node: Node{
 			level:       level,
@@ -77,7 +80,7 @@ func NewINodeForHeightGrowth(splitKey interface{}, left, right, sibling NodeInte
 	}
 	// 初始化条目
 	inode.Entries[0] = Entry{
-		Key:   splitKey,
+		Key:   key,
 		Value: right,
 	}
 	return inode
@@ -135,7 +138,7 @@ func (in *INode) ScanNode(key interface{}) NodeInterface {
 		if !ok {
 			return nil // 或其他错误处理
 		}
-
+		//inode的最大highKey都小于要插入的Key，那么就要去右侧sibling节点找了
 		if highKeyInt < keyInt {
 			// 使用类型断言来检查 siblingPtr 是否实际上是 *Node 类型
 			if node, ok := in.siblingPtr.(NodeInterface); ok {
@@ -181,12 +184,6 @@ func (in *INode) Insert(key interface{}, value interface{}, version uint64) int 
 	//copy(in.Entries[pos+2:], in.Entries[pos+1:int(in.count)])
 	//in.Entries[pos+1] = Entry{Key: key, Value: value}
 	//in.IncrementCount()
-
-	// 更新 HighKey
-	if in.count > 0 {
-		in.HighKey = in.Entries[in.count-1].Key
-	}
-
 	return InsertSuccess
 }
 

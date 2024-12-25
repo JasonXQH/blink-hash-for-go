@@ -225,8 +225,7 @@ func TimeStampTest() {
 		}
 
 		for i := startIdx; i < endIdx; i++ {
-			buf := make([]interface{}, ops[i].Range)
-			_ = tree.RangeLookup(ops[i].Pair.Key, ops[i].Range, buf, tree.GetThreadInfo())
+			_ = tree.RangeLookup(ops[i].Pair.Key, ops[i].Range, tree.GetThreadInfo())
 			if err != nil && earliest {
 				runNum[tid] = uint64(i - startIdx)
 				return
@@ -278,8 +277,7 @@ func TimeStampTest() {
 					sensorID = 0
 				}
 			case OP_SCAN:
-				buf := make([]interface{}, ops[i].Range)
-				tree.RangeLookup(ops[i].Pair.Key, ops[i].Range, buf, tree.GetThreadInfo())
+				tree.RangeLookup(ops[i].Pair.Key, ops[i].Range, tree.GetThreadInfo())
 			case OP_READ:
 				tree.Lookup(ops[i].Pair.Key, tree.GetThreadInfo())
 			}

@@ -129,7 +129,38 @@ insertLoop: // 标签
 			leafNode.WriteUnlock() // Release leafNode lock
 			continue               // Restart the insert process.
 		} else if ret == InsertSuccess { // Insertion succeeded.
-			leafNode.WriteUnlock() // Release leafNode lock
+			//TODO: 刷新parent的HighKey
+			// 1) 先检查是否新插入的 key > leafNode.HighKey
+			if compareIntKeys(key, leafNode.GetHighKey()) > 0 {
+				leafNode.SetHighKey(key)
+			}
+			leafNode.WriteUnlock()
+
+			// 2) 从栈顶往上遍历父节点，看是否需要更新 HighKey
+			//    注意要对父节点做相应的加锁更新，避免并发问题
+			for i := len(stack) - 1; i >= 0; i-- {
+				parent := stack[i]
+				parentVersion, needRestart := parent.TryReadLock()
+				if needRestart {
+					// 如果需要重启，可以 break 或者先行处理
+					// 这里简化写法：先不做复杂的 restart，直接尝试一下
+					continue
+				}
+				// 升级为写锁
+				ok, needRestart := parent.TryUpgradeWriteLock(parentVersion)
+				if !ok || needRestart {
+					parent.WriteUnlock()
+					// 同理，这里也可以再 break / continue 进行更复杂的重启处理
+					continue
+				}
+
+				if compareIntKeys(key, parent.GetHighKey()) > 0 {
+					parent.SetHighKey(key)
+				}
+
+				// 解锁
+				parent.WriteUnlock()
+			}
 			return
 		} else { // Leaf node split.
 			splittableLeaf, splitKey := leafNode.Split(key, value, leafVersion)
@@ -138,7 +169,7 @@ insertLoop: // 标签
 				continue               // 重启插入过程
 			}
 
-			newLeafNode, ok := splittableLeaf.(LeafNodeInterface)
+			newNode, ok := splittableLeaf.(NodeInterface)
 			if !ok {
 				panic("expected LeafNodeInterface new leaf node")
 			}
@@ -204,7 +235,13 @@ insertLoop: // 标签
 					//}
 
 					if !oldParent.IsFull() { // Normal insert.
-						oldParent.Insert(splitKey, newLeafNode, oldParent.GetLock())
+						//重点关注这个splitKey
+						oldParent.Insert(splitKey, newNode, oldParent.GetLock())
+						// ——> 在这里判断若 splitKey > oldParent.HighKey，就更新
+						if compareIntKeys(newNode.GetHighKey(), oldParent.GetHighKey()) > 0 {
+							oldParent.SetHighKey(newNode.GetHighKey())
+						}
+						//bt.PrintTree()
 						oldParent.WriteUnlock()
 						return
 					}
@@ -212,18 +249,28 @@ insertLoop: // 标签
 					// Internal node split.
 					newParent, newSplitKey := oldParent.Split()
 					if compareIntKeys(splitKey, newSplitKey) <= 0 {
-						oldParent.Insert(splitKey, newLeafNode, oldParent.GetLock())
+						oldParent.Insert(splitKey, newNode, oldParent.GetLock())
+						// 若 splitKey > oldParent.HighKey，更新 oldParent
+						if compareIntKeys(newNode.GetHighKey(), oldParent.GetHighKey()) > 0 {
+							oldParent.SetHighKey(newNode.GetHighKey())
+						}
 					} else {
-						newParent.Insert(splitKey, newLeafNode, newParent.GetLock())
+						newParent.Insert(splitKey, newNode, newParent.GetLock())
+						// 若 splitKey > newParent.HighKey，更新 newParent
+						if compareIntKeys(newNode.GetHighKey(), newParent.GetHighKey()) > 0 {
+							newParent.SetHighKey(newNode.GetHighKey())
+						}
 					}
+
 					oldParent.WriteUnlock()
 					if stackIdx > 0 {
 						splitKey = newSplitKey
 						stackIdx--
 						oldParent = stack[stackIdx]
+						newNode = newParent
 					} else { // set new root
 						if oldParent == bt.root {
-							newRoot := NewINodeForHeightGrowth(splitKey, oldParent, newParent, nil, oldParent.GetLevel()+1, newParent.GetHighKey())
+							newRoot := NewINodeForHeightGrowth(oldParent.GetHighKey(), oldParent, newParent, nil, oldParent.GetLevel()+1, newParent.GetHighKey())
 							bt.root = newRoot
 							oldParent.WriteUnlock()
 						} else {
@@ -235,16 +282,17 @@ insertLoop: // 标签
 			} else {
 				// Set new root node.
 				if bt.root == leafNode { // Current node is root.
-					newRoot := NewINodeForHeightGrowth(splitKey, leafNode, newLeafNode, nil, leafNode.GetLevel()+1, newLeafNode.GetHighKey())
+					newRoot := NewINodeForHeightGrowth(splitKey, leafNode, newNode, nil, leafNode.GetLevel()+1, newNode.GetHighKey())
 					bt.root = newRoot
-					leafNode.WriteUnlock()
 				} else { // Another thread has already created a new root.
-					bt.insertKey(splitKey, newLeafNode, leafNode)
-					leafNode.WriteUnlock() // Ensure to release leafNode lock
+					bt.insertKey(splitKey, newNode, leafNode)
 				}
+				leafNode.WriteUnlock() // Ensure to release leafNode lock
+				return
 			}
-			//bt.PrintTree()
+
 		}
+
 	}
 }
 
@@ -741,59 +789,167 @@ func nodeInterfaceSliceForBTreeNode(nodes []*LNodeBTree) []NodeInterface {
 	return res
 }
 
-func (bt *BTree) RangeLookup(min_key interface{}, rng int, buf []interface{}, ti *ThreadInfo) int {
+// RangeLookup performs a range lookup starting from minKey, collecting up to rng items.
+// Returns the collected results in a slice.
+func (bt *BTree) RangeLookup(minKey interface{}, rng int, ti *ThreadInfo) []interface{} {
 	eg := NewEpocheGuard(ti)
 	defer eg.Release()
 
-restart:
-	cur := bt.root
-	curVersion, needRestart := cur.TryReadLock()
-	if needRestart {
-		goto restart
-	}
+rangeLoop:
+	for {
+		restart := false
+		results := make([]interface{}, 0, rng) // 用来收集本次查询的结果
 
-	// traversal
-	for cur.GetLevel() != 0 {
-		parent, ok := cur.(INodeInterface)
-		if !ok {
-			panic("expected *INode")
-		}
-		child := parent.ScanNode(min_key)
-		childVersion, needRestart := child.TryReadLock()
+		cur := bt.root
+		curVersion, needRestart := cur.TryReadLock()
 		if needRestart {
-			goto restart
+			continue rangeLoop
 		}
 
-		curEndVersion, needRestart := cur.GetVersion()
-		if needRestart || (curVersion != curEndVersion) {
-			goto restart
-		}
+		// 如果发生 restart，需要释放 cur 的锁
+		defer func() {
+			if restart {
+				cur.WriteUnlock()
+			}
+		}()
 
-		cur = child
-		curVersion = childVersion
-	}
-
-	leaf, ok := cur.(LeafNodeInterface)
-	if !ok {
-		panic("expected LeafNodeInterface")
-	}
-	leafVersion := curVersion
-
-	count := 0
-	continued := false
-	for count < rng {
-		// move right if necessary
-		for leaf.GetSiblingPtr() != nil && compareIntKeys(leaf.GetHighKey(), min_key) < 0 {
-			sibling := leaf.GetSiblingPtr()
-			siblingVersion, needRestart := sibling.TryReadLock()
+		// 1) 从根下探到叶子
+		for cur.GetLevel() != 0 {
+			parent, ok := cur.(INodeInterface)
+			if !ok {
+				panic("Need INodeInterface")
+			}
+			child := parent.ScanNode(minKey)
+			if child == nil {
+				panic("ScanNode returned nil")
+			}
+			childVersion, needRestart := child.TryReadLock()
 			if needRestart {
-				goto restart
+				parent.WriteUnlock()
+				restart = true
+				break
 			}
 
+			// Check version consistency
+			curEndVersion, needRestart := cur.GetVersion()
+			if needRestart || (curVersion != curEndVersion) {
+				parent.WriteUnlock()
+				child.WriteUnlock()
+				restart = true
+				break
+			}
+
+			// 下探到 child
+			cur = child
+			curVersion = childVersion
+
+			// 释放父节点
+			parent.WriteUnlock()
+
+			if restart {
+				cur.WriteUnlock()
+				continue rangeLoop
+			}
+		}
+
+		if restart {
+			// 表示在下探过程中要重启
+			cur.WriteUnlock()
+			continue rangeLoop
+		}
+
+		// 2) 此时 cur 为叶节点
+		leaf, ok := cur.(LeafNodeInterface)
+		if !ok {
+			panic("expected LeafNodeInterface")
+		}
+		leafVersion := curVersion
+		continued := false
+		// 3) 不断在当前或兄弟节点中收集，直到 results >= rng
+		for len(results) < rng {
+			// a) 如果当前叶节点的HighKey < minKey，则说明要去兄弟节点
+			for leaf.GetSiblingPtr() != nil && compareIntKeys(leaf.GetHighKey(), minKey) < 0 {
+				sibling := leaf.GetSiblingPtr()
+				siblingVersion, needRestart := sibling.TryReadLock()
+				if needRestart {
+					leaf.WriteUnlock()
+					restart = true
+					break
+				}
+
+				leafEndVersion, needRestart := leaf.GetVersion()
+				if needRestart || (leafVersion != leafEndVersion) {
+					sibling.WriteUnlock()
+					leaf.WriteUnlock()
+					restart = true
+					break
+				}
+
+				lf, ok := sibling.(LeafNodeInterface)
+				if !ok {
+					panic("expected LeafNodeInterface")
+				}
+
+				// 切换到 sibling
+				leaf.WriteUnlock()
+				leaf = lf
+				leafVersion = siblingVersion
+			}
+
+			if restart {
+				continue rangeLoop
+			}
+
+			// b) 调用叶节点的 RangeLookUp
+			//    注意这里的 continued 可以根据需要来设置
+			//    初次进入可以传 continued=false，若需要多次在同节点内收集则可传true
+			collected, retCode, _ := leaf.RangeLookUp(minKey, rng-len(results), continued, leafVersion)
+			if retCode == NeedRestart {
+				leaf.WriteUnlock()
+				continue rangeLoop
+			} else if retCode == NeedConvert {
+				bt.convert(leaf, leafVersion, ti)
+				leaf.WriteUnlock()
+				continue rangeLoop
+			}
+			continued = true
+			// 追加收集结果
+			results = append(results, collected...)
+
+			// 如果已经收集够了 rng
+			if len(results) >= rng {
+				leaf.WriteUnlock()
+				return results
+			}
+
+			// c) 检查兄弟节点
+			sibling := leaf.GetSiblingPtr()
 			leafEndVersion, needRestart := leaf.GetVersion()
 			if needRestart || (leafVersion != leafEndVersion) {
-				goto restart
+				leaf.WriteUnlock()
+				continue rangeLoop
 			}
+
+			if sibling == nil {
+				// 到达最右叶子,结束
+				leaf.WriteUnlock()
+				return results
+			}
+
+			// 切换到 sibling
+			siblingVersion, needRestart := sibling.TryReadLock()
+			if needRestart {
+				leaf.WriteUnlock()
+				continue rangeLoop
+			}
+			leafEndVersion, needRestart = leaf.GetVersion()
+			if needRestart || (leafVersion != leafEndVersion) {
+				sibling.WriteUnlock()
+				leaf.WriteUnlock()
+				continue rangeLoop
+			}
+
+			leaf.WriteUnlock()
 
 			lf, ok := sibling.(LeafNodeInterface)
 			if !ok {
@@ -803,48 +959,9 @@ restart:
 			leafVersion = siblingVersion
 		}
 
-		ret := leaf.RangeLookUp(min_key, &buf, count, rng, continued)
-		// ret的逻辑：
-		// -1需要重启
-		// -2需要convert
-		// 其他为已插入个数
-		if ret == NeedRestart {
-			goto restart
-		} else if ret == -2 {
-			bt.convert(leaf, leafVersion, ti)
-			goto restart
-		}
-		continued = true
-
-		sibling := leaf.GetSiblingPtr()
-
-		leafEndVersion, needRestart := leaf.GetVersion()
-		if needRestart || (leafVersion != leafEndVersion) {
-			goto restart
-		}
-
-		if ret == rng {
-			return ret
-		}
-
-		if sibling == nil {
-			break
-		}
-
-		siblingVersion, needRestart := sibling.TryReadLock()
-		if needRestart {
-			goto restart
-		}
-		lf, ok := sibling.(LeafNodeInterface)
-		if !ok {
-			panic("expected LeafNodeInterface")
-		}
-		leaf = lf
-		leafVersion = siblingVersion
-		count = ret
+		leaf.WriteUnlock()
+		return results
 	}
-
-	return count
 }
 
 // convert 对叶子节点进行转换，与C++一致
@@ -1203,27 +1320,36 @@ func printNode(n NodeInterface, prefix string, isTail bool) {
 	// 根据节点类型递归打印其子节点或叶子信息
 	switch nodeType {
 	case INNERNode:
-		// INode：有多个 Entries，每个 Entry 会有一个子节点指针
 		in := n.(*INode)
 
-		// Entries: 类似 B-Tree 内部节点的情况，其中每个 entry 对应一个子节点
-		// 假定 in.Entries[i].Key, in.Entries[i].ChildNode
-		// 首先打印所有子节点（左到右）
-		for i, entry := range in.Entries {
-			isLast := (i == len(in.Entries)-1)
+		// （1）先打印 leftmostPtr 指向的子节点（如果有）
+		//     它代表最左侧子树，不属于 in.Entries[] 数组
+		if in.leftmostPtr != nil {
+			// isLastChild = 当 count=0 时, leftmostPtr 就是唯一的子节点
+			isLastChild := (in.count == 0)
 			newPrefix := prefix + nextLevelPrefix(isTail)
-			// 打印子树
-			// Entry里可能有指向子节点的指针（这里假设 Entry 里有 ChildNode 字段表示子节点）
-			childNode := entry.Value.(NodeInterface)
-			fmt.Printf("%s        Key: %v\n", newPrefix, entry.Key)
-			printNode(childNode, newPrefix, isLast)
+
+			// 给它起个名字，比如 "Leftmost child" 或者直接打印
+			fmt.Printf("%s%s LeftmostChildPtr\n",
+				newPrefix, leafConnector(!isLastChild))
+
+			printNode(in.leftmostPtr.(NodeInterface), newPrefix, isLastChild)
 		}
 
-		// INode 可能有比 entries 数量多一个子指针（B-Tree 通常如此）
-		// 假设 in.LeftmostPtr 是最左子树（如果有的话）
-		// 根据需要打印 leftmostPtr，如果存在的话：
-		if in.leftmostPtr != nil {
-			printNode(in.leftmostPtr, prefix, false)
+		// （2）遍历 [0..in.count-1] 的 entries
+		//     对每个 entry，先打印 “Key”，再打印 entry[i].Value
+		for i := 0; i < int(in.count); i++ {
+			isLastEntry := i == int(in.count)-1
+			newPrefix := prefix + nextLevelPrefix(isTail)
+
+			// 打印这个条目对应的键
+			// 如果想把“Key:”对齐或缩进美观，也可以在这里调格式
+			fmt.Printf("%s    Key: %v\n", newPrefix, in.Entries[i].Key)
+
+			// 再打印它指向的子节点
+			// 这里假设 entry.Value 一定是 NodeInterface
+			childNode := in.Entries[i].Value.(NodeInterface)
+			printNode(childNode, newPrefix, isLastEntry)
 		}
 
 	case BTreeNode:
@@ -1254,173 +1380,6 @@ func printNode(n NodeInterface, prefix string, isTail bool) {
 		// 其他未识别类型，不做特殊处理
 	}
 }
-
-//
-//func (bt *BTree) PrintTree() {
-//	bt.lock.Lock()
-//	defer bt.lock.Unlock()
-//	fmt.Println("BTree Structure:")
-//
-//	// 首先打印内部结构，并收集叶子节点
-//	leafNodes := make([]NodeInterface, 0)
-//	printInternalStructure(bt.root, "", true, &leafNodes)
-//
-//	// 打印叶子层
-//	fmt.Println("Leaves (left to right):")
-//	if len(leafNodes) > 0 {
-//		// 假设叶子节点是从左到右收集到的，如果不确定顺序，可以从 leftmost leaf 开始
-//		// 这里从 leafNodes[0] 开始逐个 follow siblingPtr
-//		leftmostLeaf := findLeftmostLeaf(bt.root)
-//		printLeafChain(leftmostLeaf)
-//	} else {
-//		fmt.Println("<No leaves>")
-//	}
-//}
-//
-//func printInternalStructure(n NodeInterface, prefix string, isTail bool, leafNodes *[]NodeInterface) {
-//	if n == nil {
-//		fmt.Printf("%s%s <NIL>\n", prefix, leafConnector(isTail))
-//		return
-//	}
-//
-//	nodeType := n.GetType()
-//	var nodeDesc string
-//	switch nodeType {
-//	case INNERNode:
-//		nodeDesc = fmt.Sprintf("INode(level=%d, highKey=%v, count=%d)", n.GetLevel(), n.GetHighKey(), n.GetCount())
-//	case BTreeNode:
-//		nodeDesc = fmt.Sprintf("LNodeBTree(level=%d, highKey=%v, count=%d)", n.GetLevel(), n.GetHighKey(), n.GetCount())
-//	case HashNode:
-//		nodeDesc = fmt.Sprintf("LNodeHash(level=%d, highKey=%v, count=%d)", n.GetLevel(), n.GetHighKey(), n.GetCount())
-//	default:
-//		nodeDesc = fmt.Sprintf("UnknownNodeType(level=%d, highKey=%v, count=%d)", n.GetLevel(), n.GetHighKey(), n.GetCount())
-//	}
-//
-//	fmt.Printf("%s%s %s\n", prefix, leafConnector(isTail), nodeDesc)
-//
-//	switch nodeType {
-//	case INNERNode:
-//		in := n.(*INode)
-//		// 打印leftmostPtr子节点
-//		if in.leftmostPtr != nil {
-//			// leftmostPtr 是比第一个entry更左的子节点
-//			newPrefix := prefix + nextLevelPrefix(isTail)
-//			// 假设最左子指针不一定是最后一个，需要根据entries数量判断
-//			// 这里先打印leftmostPtr
-//			if len(in.Entries) == 0 {
-//				// 没有entries时，这个子节点就是唯一的子节点
-//				printInternalStructure(in.leftmostPtr, newPrefix, true, leafNodes)
-//			} else {
-//				printInternalStructure(in.leftmostPtr, newPrefix, false, leafNodes)
-//			}
-//		}
-//
-//		// 对每个entry的子节点递归打印
-//		for i, entry := range in.Entries {
-//			isLast := (i == len(in.Entries)-1)
-//			newPrefix := prefix + nextLevelPrefix(isTail)
-//			fmt.Printf("%s        Key: %v\n", newPrefix, entry.Key)
-//			// 这里假设entry.Value是子节点，需根据你的结构实际修改
-//			childNode := entry.Value.(NodeInterface)
-//			printInternalStructure(childNode, newPrefix, isLast, leafNodes)
-//		}
-//
-//	case BTreeNode, HashNode:
-//		// 遇到叶子节点就不在当前递归中详细打印，只是将其收集到leafNodes切片中
-//		*leafNodes = append(*leafNodes, n)
-//
-//	default:
-//		// 未知类型：也视为叶子节点
-//		*leafNodes = append(*leafNodes, n)
-//	}
-//}
-//
-//// 打印叶子链条
-//func printLeafChain(n NodeInterface) {
-//	current := n
-//	prefix := ""
-//	for current != nil {
-//		nodeType := current.GetType()
-//		switch nodeType {
-//		case BTreeNode:
-//			ln := current.(*LNodeBTree)
-//			printBTreeLeafNode(ln, prefix, true)
-//		case HashNode:
-//			ln := current.(*LNodeHash)
-//			printHashLeafNode(ln, prefix, true)
-//		default:
-//			fmt.Printf("%s%s UnknownLeaf(level=%d, highKey=%v, count=%d)\n",
-//				prefix, leafConnector(true), current.GetLevel(), current.GetHighKey(), current.GetCount())
-//		}
-//
-//		// 打印链条连接符号
-//		current = current.GetSiblingPtr()
-//		if current != nil {
-//			fmt.Println(prefix + "->")
-//		} else {
-//			fmt.Println(prefix + "-> NIL")
-//		}
-//	}
-//}
-//
-//// 打印 LNodeBTree 的详细信息（竖向结构）
-//func printBTreeLeafNode(ln *LNodeBTree, prefix string, isTail bool) {
-//	fmt.Printf("%s%s LNodeBTree(level=%d, highKey=%v, count=%d)\n",
-//		prefix, leafConnector(isTail), ln.GetLevel(), ln.GetHighKey(), ln.GetCount())
-//	for i, entry := range ln.Entries {
-//		isEntryLast := (i == len(ln.Entries)-1)
-//		entryPrefix := prefix + nextLevelPrefix(isTail)
-//		fmt.Printf("%s%s Entry: %v\n", entryPrefix, leafConnector(isEntryLast), entry.Key)
-//	}
-//}
-//
-//// 打印 LNodeHash 的详细信息（竖向结构）
-//// 使用类似你给出代码片段的形式
-//func printHashLeafNode(ln *LNodeHash, prefix string, isTail bool) {
-//	fmt.Printf("%s%s LNodeHash(level=%d, highKey=%v, count=%d)\n",
-//		prefix, leafConnector(isTail), ln.GetLevel(), ln.GetHighKey(), ln.GetCount())
-//	for bIndex, bucket := range ln.Buckets {
-//		isBucketLast := (bIndex == len(ln.Buckets)-1)
-//		newPrefix := prefix + nextLevelPrefix(isTail)
-//		fmt.Printf("%s%s Bucket #%d [state=%v]\n", newPrefix, leafConnector(isBucketLast), bIndex, bucket.state)
-//		for eIndex, entry := range bucket.entries {
-//			isEntryLast := (eIndex == len(bucket.entries)-1)
-//			entryPrefix := newPrefix + nextLevelPrefix(isBucketLast)
-//			fmt.Printf("%s%s Entry: %v\n", entryPrefix, leafConnector(isEntryLast), entry.Key)
-//		}
-//	}
-//}
-//
-//func findLeftmostLeaf(n NodeInterface) NodeInterface {
-//	// 从root开始，一直走leftmostPtr直到找到叶子
-//	current := n
-//	for current != nil {
-//		switch current.GetType() {
-//		case INNERNode:
-//			in := current.(*INode)
-//			if in.leftmostPtr != nil {
-//				current = in.leftmostPtr
-//			} else {
-//				// 没有leftmostPtr，可能entries子节点是叶子
-//				if len(in.Entries) > 0 {
-//					// 假定Entries中的第一个子节点是最左的子节点
-//					firstChild := in.Entries[0].Value.(NodeInterface)
-//					current = firstChild
-//				} else {
-//					// 空的INode？那就返回它自己（不太可能）
-//					return current
-//				}
-//			}
-//		case BTreeNode, HashNode:
-//			// 已经是叶子
-//			return current
-//		default:
-//			// 未知节点类型，当作叶子
-//			return current
-//		}
-//	}
-//	return nil
-//}
 
 // 以下是辅助函数
 

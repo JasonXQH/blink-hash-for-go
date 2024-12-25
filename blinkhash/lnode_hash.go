@@ -73,6 +73,7 @@ func NewLNodeHashWithSibling(sibling NodeInterface, count int32, level int) *LNo
 func (lh *LNodeHash) GetHighKey() interface{} {
 	return lh.HighKey
 }
+func (lh *LNodeHash) SetHighKey(key interface{}) { lh.HighKey = key }
 
 // Print
 //
@@ -234,7 +235,12 @@ func (lh *LNodeHash) Insert(key interface{}, value interface{}, version uint64) 
 				lh.Buckets[loc].Unlock()
 				// 成功插入后递增计数
 				atomic.AddInt32(&lh.count, 1) // 假设 Count 是 int32 类型
-				return InsertSuccess          // 返回 0
+				// 如果新插入的 key > 当前节点的 HighKey，则更新
+				// 注意根据你的 compareIntKeys 或其他比较函数来做判断
+				if compareIntKeys(key, lh.HighKey) > 0 {
+					lh.HighKey = key
+				}
+				return InsertSuccess // 返回 0
 			}
 
 			// 插入失败，解锁并继续
@@ -468,6 +474,9 @@ InsertLoop:
 							targetNode.Buckets[loc].entries[i].Key = key
 							targetNode.Buckets[loc].entries[i].Value = value
 							needInsert = false
+							if compareIntKeys(key, targetNode.HighKey) > 0 {
+								targetNode.HighKey = key
+							}
 							lh.IncrementCount()
 							break InsertLoop
 						}
@@ -698,23 +707,27 @@ func (lh *LNodeHash) Find(key interface{}) (interface{}, bool) {
 //	@param searchRange
 //	@param continued
 //	@return int
-func (lh *LNodeHash) RangeLookUp(key interface{}, buf *[]interface{}, count int, rrange int, continued bool) int {
-	// 收集的条目缓冲区
-	var collectedEntries []Entry
+func (lh *LNodeHash) RangeLookUp(key interface{}, upTo int, continued bool, version uint64) ([]interface{}, int, int) {
+	if Adaption {
+		return nil, NeedConvert, 0
+	}
 
+	// 收集条目
+	var collectedEntries []Entry
 	for j := 0; j < lh.Cardinality; j++ {
 		bucketVstart, nr := lh.Buckets[j].getVersion()
 		if nr {
-			return -1
+			return nil, NeedRestart, 0
 		}
 
+		// 如果 LINKED & bucket 不稳定，需要 Stabilize
 		if LINKED && lh.Buckets[j].state != STABLE {
 			if !lh.Buckets[j].upgradeLock(bucketVstart) {
-				return -1
+				return nil, NeedRestart, 0
 			}
 			if !lh.StabilizeBucket(j) {
 				lh.Buckets[j].Unlock()
-				return -1
+				return nil, NeedRestart, 0
 			}
 			lh.Buckets[j].Unlock()
 			bucketVstart += 0b100
@@ -724,33 +737,32 @@ func (lh *LNodeHash) RangeLookUp(key interface{}, buf *[]interface{}, count int,
 		if FINGERPRINT {
 			entries = lh.Buckets[j].CollectWithFingerprint(key, EmptyFingerprint)
 		} else {
-			entries = lh.Buckets[j].Collect(key) // 无fingerprint版本，相同逻辑
+			entries = lh.Buckets[j].Collect(key)
 		}
-
 		collectedEntries = append(collectedEntries, entries...)
 
 		bucketVend, nr := lh.Buckets[j].getVersion()
 		if nr || (bucketVstart != bucketVend) {
-			return -1
+			return nil, NeedRestart, 0
 		}
 	}
 
-	// 对收集到的条目按key排序
+	// 如果 continued == true, 我们的逻辑其实跟 LNodeHash
+	// 是否要从 key 再次搜？由你决定
+	// 这里暂时与 continued 无关, 只要 key <= entry 就搜
+
+	// 对收集到的条目按 key 排序
 	sort.Slice(collectedEntries, func(i, j int) bool {
-		// 假设key为int进行比较
 		return collectedEntries[i].Key.(int) < collectedEntries[j].Key.(int)
 	})
 
-	// 将排序后的值填入buf
-	_count := count
-	for i := 0; i < len(collectedEntries); i++ {
-		*buf = append(*buf, collectedEntries[i].Value)
-		_count++
-		if _count == rrange {
-			return _count
-		}
+	// 截取 upTo 条
+	collected := make([]interface{}, 0, upTo)
+	for i := 0; i < len(collectedEntries) && i < upTo; i++ {
+		collected = append(collected, collectedEntries[i].Value)
 	}
-	return _count
+
+	return collected, 0, len(collected)
 }
 
 // Utilization

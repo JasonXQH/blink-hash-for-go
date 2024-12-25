@@ -15,6 +15,7 @@ const (
 	RemoveSuccess = 0
 	UpdateSuccess = 0
 	UpdateFailure = 1
+	NeedConvert   = -2
 )
 
 var statusNames = map[int]string{
@@ -92,6 +93,7 @@ const (
 //	PageSize              = 512 // 示例页大小，具体值应根据实际情况调整
 //	HashFuncsNum          = 2
 //	NumSlot               = 4
+//	Adaption              = true //lnodeHash是否需要转换为bNode
 //)
 
 // dev
@@ -103,4 +105,5 @@ const (
 	PageSize              = 4
 	HashFuncsNum          = 1
 	NumSlot               = 2
+	Adaption              = true //lnodeHash是否需要转换为bNode
 )

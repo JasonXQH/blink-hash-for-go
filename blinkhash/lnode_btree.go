@@ -334,28 +334,36 @@ func (lb *LNodeBTree) findPosLinear(key interface{}) int {
 //	@param searchRange
 //	@param continued
 //	@return int
-func (lb *LNodeBTree) RangeLookUp(key interface{}, buf *[]interface{}, count int, searchRange int, continued bool) int {
-	currentCount := count // 使用一个单独的变量跟踪填充数量
+func (lb *LNodeBTree) RangeLookUp(key interface{}, upTo int, continued bool, version uint64) ([]interface{}, int, int) {
+	// LNodeBTree 不需要 version 做并发检测，这里忽略
+	// retCode 默认 0 表示正常, NeedRestart/NeedConvert 不适用此实现
+
+	collected := make([]interface{}, 0, upTo)
+	currentCount := 0
+
+	// 如果 continued == true，表示我们之前已经搜到一部分了，这次无视 key，直接遍历
 	if continued {
 		for i := 0; i < int(lb.count); i++ {
-			*buf = append(*buf, lb.Entries[i].Value)
+			collected = append(collected, lb.Entries[i].Value)
 			currentCount++
-			if currentCount == searchRange {
-				return currentCount
+			if currentCount == upTo {
+				return collected, 0, currentCount
 			}
 		}
-		return currentCount
+		return collected, 0, currentCount
 	} else {
+		// 未连续查找，则先找到 key 的起点
 		pos := lb.FindLowerBound(key)
-		// 从 pos 开始，注意 pos + 1 是否合理，取决于具体需求
+		// 假设: FindLowerBound 返回小于等于 key 的位置,
+		// 我们希望从 pos+1 开始收集
 		for i := pos + 1; i < int(lb.count); i++ {
-			*buf = append(*buf, lb.Entries[i].Value)
+			collected = append(collected, lb.Entries[i].Value)
 			currentCount++
-			if currentCount == searchRange {
-				return currentCount
+			if currentCount == upTo {
+				return collected, 0, currentCount
 			}
 		}
-		return currentCount
+		return collected, 0, currentCount
 	}
 }
 
@@ -524,6 +532,7 @@ func (lb *LNodeBTree) GetType() NodeType {
 func (lb *LNodeBTree) GetEntries() []Entry {
 	return lb.Entries
 }
+func (lb *LNodeBTree) SetHighKey(key interface{}) { lb.HighKey = key }
 
 func (lb *LNodeBTree) GetCardinality() int {
 	return lb.Cardinality

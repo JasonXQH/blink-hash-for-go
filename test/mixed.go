@@ -49,8 +49,8 @@ func MixedTest() {
 			if ratio < insertRatio {
 				tree.Insert(keys[i+half], Value_t(keys[i+half]), ti)
 			} else {
-				var buf []interface{}
-				_ = tree.RangeLookup(keys[i], 100, buf, ti)
+				results := tree.RangeLookup(keys[i], 100, ti)
+				fmt.Printf("RangeLookup minKey=%v got %d results: %v\n", keys[i], len(results), results)
 			}
 		}
 	}
