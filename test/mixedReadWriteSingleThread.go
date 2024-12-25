@@ -19,12 +19,13 @@ func SingleThreadTest() {
 	tree := blinkhash.NewBTree()
 	ti := blinkhash.NewThreadInfo(tree.GetEpoche())
 
-	half := numData / 2
+	//half := numData / 2
+	half := 1
 
 	// Warmup
 	fmt.Println("Warmup starts (single thread)")
 	start := time.Now()
-	for i := 0; i < half; i++ {
+	for i := 0; i < numData; i++ {
 		tree.Insert(keys[i], Value_t(keys[i]), ti)
 	}
 	fmt.Println("Warmup done in", time.Since(start))

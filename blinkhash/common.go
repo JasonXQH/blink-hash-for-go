@@ -99,7 +99,7 @@ const (
 // dev
 const (
 	LNodeHashCardinality  = 4
-	LNodeBTreeCardinality = 4
+	LNodeBTreeCardinality = 8
 	INodeCardinality      = 4
 	EntryNum              = 2
 	PageSize              = 4

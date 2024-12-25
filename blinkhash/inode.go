@@ -56,11 +56,14 @@ func NewINodeFromLeaves(node NodeInterface) *INode {
 func NewINodeForInsertInBatch(level int) *INode {
 	return &INode{
 		Node: Node{
-			level: level,
+			level:       level,
+			siblingPtr:  nil,
+			leftmostPtr: nil,
 		},
 		Type:        INNERNode,
 		Cardinality: INodeCardinality,
-		Entries:     make([]Entry, INodeCardinality), // 初始化为空但有容量
+		HighKey:     nil,
+		Entries:     make([]Entry, 0, INodeCardinality), // 初始化为空但有容量
 	}
 }
 
@@ -468,7 +471,7 @@ func (in *INode) BatchInsertLastLevelWithMovement(
 func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]*INode, error) {
 	pos := in.FindLowerBound(keys[0])
 	batchSizeCalc := int(float64(in.Cardinality) * FillFactor)
-	inplace := (int(in.count) + num) < in.Cardinality
+	inplace := (int(in.count) + num) <= in.Cardinality
 	moveNum := 0
 	idx := 0
 	if pos < 0 {
@@ -628,14 +631,18 @@ func (in *INode) CalculateNodeNum(totalNum int, batchSize int) (newNum int, last
 	return
 }
 
-func (in *INode) InsertForRoot(keys []interface{}, values []NodeInterface, left *Node, num int) {
+func (in *INode) InsertForRoot(keys []interface{}, values []NodeInterface, left NodeInterface, num int) {
 	in.leftmostPtr = left
-	for i := 0; i < num; i++ {
+	for i := 1; i < num; i++ {
 		in.Entries = append(in.Entries, Entry{
 			Key:   keys[i],
 			Value: values[i],
 		})
 		in.IncrementCount()
+		// 更新 HighKey
+		if in.HighKey == nil || compareIntKeys(keys[i], in.HighKey) > 0 {
+			in.HighKey = keys[i]
+		}
 	}
 }
 
