@@ -48,5 +48,5 @@ func SingleThreadTest() {
 	fmt.Printf("RangeLookUp Throughput: %.2f mops/sec\n", float64(half)/elapsed.Seconds()/1e6)
 
 	//也可以随时打断点查看树结构：
-	tree.PrintTree()
+	//tree.PrintTree()
 }
