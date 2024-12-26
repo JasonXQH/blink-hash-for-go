@@ -761,12 +761,15 @@ batchLoop:
 			newNodes, err = parent.BatchInsertLastLevel(keys, values, num, 0)
 		} else {
 			// 内部节点
-			//newNodes, err = parent.BatchInsert(keys, values, num)
+			//fmt.Println("准备往高层inode插入新inode，新inode属性: ")
+			//printNode(values[0], "", false)
+			//bt.PrintTree()
+			newNodes, err = parent.BatchInsert(keys, values, num)
 		}
 		if err != nil {
 			// 根据需要处理错误
 			parent.WriteUnlock()
-			return
+			panic(err)
 		}
 
 		// 如果没产生新的 node，就直接返回
@@ -969,12 +972,12 @@ rangeLoop:
 				leaf.WriteUnlock()
 				continue rangeLoop
 			} else if retCode == NeedConvert {
-				fmt.Println("需要将LNodeHash转换为LNodeBtree,LeafNode:")
-				printNode(leaf, "", false)
-				bt.PrintTree()
+				//fmt.Println("需要将LNodeHash转换为LNodeBtree,LeafNode:")
+				//printNode(leaf, "", false)
+				//bt.PrintTree()
 				bt.convert(leaf, leafVersion, ti)
-				fmt.Println("转换完成，打印Tree")
-				bt.PrintTree()
+				//fmt.Println("转换完成，打印Tree")
+				//bt.PrintTree()
 				leaf.WriteUnlock()
 				continue rangeLoop
 			}
@@ -1423,7 +1426,6 @@ func printNode(n NodeInterface, prefix string, isTail bool) {
 			// 打印这个条目对应的键
 			// 如果想把“Key:”对齐或缩进美观，也可以在这里调格式
 			fmt.Printf("%s    Key: %v\n", newPrefix, in.Entries[i].Key)
-
 			// 再打印它指向的子节点
 			// 这里假设 entry.Value 一定是 NodeInterface
 			childNode := in.Entries[i].Value.(NodeInterface)
@@ -1432,12 +1434,12 @@ func printNode(n NodeInterface, prefix string, isTail bool) {
 
 	case BTreeNode:
 		// LNodeBTree：有若干 Entries，没有子节点
-		ln := n.(*LNodeBTree)
-		for i, entry := range ln.Entries {
-			isLast := (i == len(ln.Entries)-1)
-			newPrefix := prefix + nextLevelPrefix(isTail)
-			fmt.Printf("%s%s Entry: %v\n", newPrefix, leafConnector(isLast), entry.Key)
-		}
+		//ln := n.(*LNodeBTree)
+		//for i, entry := range ln.Entries {
+		//	isLast := (i == len(ln.Entries)-1)
+		//	newPrefix := prefix + nextLevelPrefix(isTail)
+		//	fmt.Printf("%s%s Entry: %v\n", newPrefix, leafConnector(isLast), entry.Key)
+		//}
 
 	case HashNode:
 		// LNodeHash：有Buckets，每个Bucket中有entries
