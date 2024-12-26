@@ -970,12 +970,12 @@ rangeLoop:
 				leaf.WriteUnlock()
 				continue rangeLoop
 			} else if retCode == NeedConvert {
-				fmt.Println("需要将LNodeHash转换为LNodeBtree,LeafNode:")
-				printNode(leaf, "", false)
-				bt.PrintTree()
+				//fmt.Println("需要将LNodeHash转换为LNodeBtree,LeafNode:")
+				//printNode(leaf, "", false)
+				//bt.PrintTree()
 				bt.convert(leaf, leafVersion, ti)
-				fmt.Println("转换完成，打印Tree")
-				bt.PrintTree()
+				//fmt.Println("转换完成，打印Tree")
+				//bt.PrintTree()
 				leaf.WriteUnlock()
 				continue rangeLoop
 			}

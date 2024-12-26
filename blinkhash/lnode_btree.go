@@ -537,3 +537,7 @@ func (lb *LNodeBTree) SetHighKey(key interface{}) { lb.HighKey = key }
 func (lb *LNodeBTree) GetCardinality() int {
 	return lb.Cardinality
 }
+
+func (lb *LNodeBTree) SetSibling(sibling LeafNodeInterface) {
+	lb.siblingPtr = sibling
+}

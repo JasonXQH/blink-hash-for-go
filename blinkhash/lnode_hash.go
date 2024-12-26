@@ -1186,12 +1186,7 @@ func (lh *LNodeHash) Convert(version uint64) ([]*LNodeBTree, int, error) {
 	// 处理左兄弟节点
 	left := lh.LeftSiblingPtr
 	if left != nil {
-		leftHash, ok := left.(*LNodeHash)
-		if !ok {
-			lh.ConvertUnlock()
-			return nil, 0, fmt.Errorf("left sibling is not *LNodeHash")
-		}
-		if !leftHash.TryWriteLock() {
+		if !left.TryWriteLock() {
 			lh.ConvertUnlock()
 			return nil, 0, fmt.Errorf("failed to write-lock left sibling")
 		}
@@ -1256,9 +1251,9 @@ func (lh *LNodeHash) Convert(version uint64) ([]*LNodeBTree, int, error) {
 
 	// 更新左兄弟节点的兄弟指针
 	if left != nil {
-		leftHash := left.(*LNodeHash)
-		leftHash.siblingPtr = leaves[0]
-		leftHash.WriteUnlock()
+		leftNode := left.(LeafNodeInterface)
+		leftNode.SetSibling(leaves[0])
+		leftNode.WriteUnlock()
 	}
 
 	// 更新右兄弟节点的左兄弟指针
@@ -1283,6 +1278,9 @@ func (lh *LNodeHash) GetType() NodeType {
 }
 func (lh *LNodeHash) GetCardinality() int {
 	return lh.Cardinality
+}
+func (lh *LNodeHash) SetSibling(sibling LeafNodeInterface) {
+	lh.siblingPtr = sibling
 }
 
 // Footprint 计算哈希叶子节点的内存占用。

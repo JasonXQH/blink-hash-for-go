@@ -7,16 +7,17 @@ type NodeInterface interface {
 	GetLevel() int
 	GetLock() uint64
 	Print()
+	TryReadLock() (uint64, bool)
+	TryWriteLock() bool
+	TryUpgradeWriteLock(version uint64) (bool, bool)
 	WriteUnlock()
 	WriteUnlockObsolete()
-	TryReadLock() (uint64, bool)
 	GetVersion() (uint64, bool)
 	GetSiblingPtr() NodeInterface
 	GetLeftmostPtr() NodeInterface
 	GetHighKey() interface{}
 	SanityCheck(prevHighKey interface{}, first bool)
 	GetType() NodeType
-	TryUpgradeWriteLock(version uint64) (bool, bool)
 	IncrementCount()
 	DecrementCount()
 	EntryGetter
@@ -56,7 +57,8 @@ type LeafNodeInterface interface {
 	NodeGetter
 	FootPrinter
 	CardinalityGetter
-	SetHighKey(key interface{})
+	SiblingSetter
+	HighkeySetter
 }
 
 // Insertable 接口定义插入方法
@@ -131,4 +133,12 @@ type CardinalityGetter interface {
 type BatchInsertable interface {
 	BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]*INode, error)
 	BatchInsert(keys []interface{}, values []NodeInterface, num int) ([]*INode, error)
+}
+
+type SiblingSetter interface {
+	SetSibling(sibling LeafNodeInterface)
+}
+
+type HighkeySetter interface {
+	SetHighKey(key interface{})
 }

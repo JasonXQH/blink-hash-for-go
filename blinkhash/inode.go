@@ -471,136 +471,194 @@ func (in *INode) BatchInsertLastLevelWithMovement(
 func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]*INode, error) {
 	pos := in.FindLowerBound(keys[0])
 	batchSizeCalc := int(float64(in.Cardinality) * FillFactor)
-	inplace := (int(in.count) + num) <= in.Cardinality
+	// 原版: bool inplace = ((cnt + num) < cardinality);
+	inplace := (int(in.count) + num - 1) <= in.Cardinality
+
 	moveNum := 0
 	idx := 0
 	if pos < 0 {
+		// insert at leftmostPtr,因为所有 entry 都要往后挪,这个moveNum代表需要挪动的entry数量
 		moveNum = int(in.count)
 	} else {
-		moveNum = int(in.count) - pos - 1
+		// insert in the middle，把后面 [pos+1 ..count-1] 往后挪 1。
+		moveNum = int(in.count) - (pos + 1)
 	}
 
-	if inplace { // 正常插入
-		in.moveNormalInsertion(pos, num, moveNum)
-		if pos < 0 { // 更新最左指针
+	if inplace {
+		// 如果仅有 1 个 BTreeNode（num=1），说明就是“1对1” 替换，不需要移动 Entry，也不需要计数+1
+		if num == 1 {
+			// 只需替换
+			if pos < 0 {
+				// 哈希节点在 leftmostPtr
+				in.leftmostPtr = values[0]
+			} else {
+				// 哈希节点在 entry[pos]
+				in.Entries[pos].Value = values[0]
+			}
+			// 不需要移动或者插入额外 entry, 也不增加 in.count
+			return nil, nil
+		} else {
+			// === 若 num > 1，才需要移动并插入多条 Entry ===
+
+			// 1) 移动后方 entry
+			in.moveNormalInsertion(pos, num, moveNum)
+
+			// 2) 替换 leftmostPtr 或 entry[pos]
+			if pos < 0 {
+				in.leftmostPtr = values[idx]
+				idx++
+			} else {
+				in.Entries[pos].Value = values[idx]
+				idx++
+			}
+
+			// 3) 插入其余 (num-1) 条 entry 到 [pos+1.. pos+num]
+			for i := pos + 1; i < pos+num; i++ {
+				in.Entries[i].Key = keys[idx]
+				in.Entries[i].Value = values[idx]
+				idx++
+			}
+
+			// c++ 原版： cnt += (num-1); net + (num-1)
+			// 如果在你实现中“覆盖”也算1个slot，那么 net + (num-1).
+			in.count += int32(num - 1)
+
+			return nil, nil
+		}
+	} else {
+		// need split / migration
+		prevHighKey := in.HighKey
+
+		// first, set leftmostPtr or entry[pos].value = values[0]
+		if pos < 0 {
 			in.leftmostPtr = values[0]
 		} else {
 			in.Entries[pos].Value = values[0]
 		}
 
-		for i, j := pos+1, 0; j < num; i, j = i+1, j+1 {
-			in.Entries[i].Key = keys[j]
-			in.Entries[i].Value = values[j]
-		}
-		in.count += int32(num)
-		return nil, nil
-	}
-	// 需要数据迁移和可能的分裂
-	prevHighKey := in.HighKey
-	if pos < 0 {
-		in.leftmostPtr = values[0]
-	} else {
-		in.Entries[pos].Value = values[0]
-	}
+		// we go into 2 big branches in c++:
+		// if (batchSize < pos) { ... } else { ... }
 
-	var migrate []Entry
-	if batchSizeCalc < pos { // 插入到中间，需要迁移
-		migrateNum := pos - batchSizeCalc
-		migrate = make([]Entry, migrateNum)
-		copy(migrate, in.Entries[batchSizeCalc:pos])
+		if batchSizeCalc < pos {
+			// case1: "插入到中间 (migrated + new kvs + moved)"
 
-		buf := make([]Entry, moveNum)
-		copy(buf, in.Entries[pos+1:pos+1+moveNum])
-		in.count = int32(batchSizeCalc)
+			migrateNum := pos - batchSizeCalc
+			// allocate slice
+			migrate := make([]Entry, migrateNum)
+			copy(migrate, in.Entries[batchSizeCalc:pos])
 
-		totalNum := num + moveNum + migrateNum
-		newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
+			buf := make([]Entry, moveNum)
+			copy(buf, in.Entries[pos+1:pos+1+moveNum])
 
-		newNodes := make([]*INode, newNum)
-		for i := range newNodes {
-			newNodes[i] = NewINodeForInsertInBatch(in.level)
-		}
+			in.count = int32(batchSizeCalc)
 
-		oldSibling := in.siblingPtr
-		in.siblingPtr = &newNodes[0].Node
-		for i := 0; i < newNum-1; i++ {
-			newNodes[i].siblingPtr = &newNodes[i+1].Node
-			// 调用重构后的 BatchInsertLastLevelWithMigrationAndMovement
-			migrateIdx, bufIdx, err := newNodes[i].BatchInsertLastLevelWithMigrationAndMovement(
-				migrate, 0, migrateNum,
-				keys, values, idx, num, batchSizeCalc,
+			totalNum := num + moveNum + migrateNum
+			newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
+
+			newNodes := make([]*INode, newNum)
+			for i := 0; i < newNum; i++ {
+				newNodes[i] = NewINodeForInsertInBatch(in.level)
+			}
+
+			oldSibling := in.siblingPtr
+			in.siblingPtr = &newNodes[0].Node
+
+			migrateIdx := 0
+			bufIdx := 0
+			// c++: high_key = migrate[migrateIdx].key
+			// maybe in.Go => in.HighKey = ...
+			if migrateNum > 0 {
+				in.HighKey = migrate[migrateIdx].Key
+			}
+
+			// fill each newNodes[i] except last one
+			for i := 0; i < newNum-1; i++ {
+				newNodes[i].siblingPtr = &newNodes[i+1].Node
+				// call BatchInsertLastLevelWithMigrationAndMovement
+				migIdx, bfIdx, err := newNodes[i].BatchInsertLastLevelWithMigrationAndMovement(
+					migrate, migrateIdx, migrateNum,
+					keys, values, idx, num, batchSizeCalc,
+					buf, bufIdx, moveNum,
+				)
+				if err != nil {
+					return nil, err
+				}
+				migrateIdx = migIdx
+				bufIdx = bfIdx
+			}
+
+			newNodes[newNum-1].siblingPtr = oldSibling
+			_, _, err := newNodes[newNum-1].BatchInsertLastLevelWithMigrationAndMovement(
+				migrate, migrateIdx, migrateNum,
+				keys, values, idx, num, lastChunk,
 				buf, 0, moveNum,
 			)
 			if err != nil {
 				return nil, err
 			}
-			idx = migrateIdx
-			bufIdx = bufIdx
-		}
-		newNodes[newNum-1].siblingPtr = oldSibling
-		_, _, err := newNodes[newNum-1].BatchInsertLastLevelWithMigrationAndMovement(
-			migrate, 0, migrateNum,
-			keys, values, idx, num, lastChunk,
-			buf, 0, moveNum,
-		)
-		if err != nil {
-			return nil, err
-		}
-		newNodes[newNum-1].HighKey = prevHighKey
-		return newNodes, nil
-	} else {
-		moveIdx := 0
-		// 处理非迁移的情况
-		buf := make([]Entry, moveNum)
-		copy(buf, in.Entries[pos+1:pos+1+moveNum])
-		idx := 0
-		for i := pos + 1; i < batchSizeCalc && idx < num; i, idx = i+1, idx+1 {
-			in.Entries[i].Key = keys[idx]
-			in.Entries[i].Value = values[idx]
-		}
-		in.count += int32(idx - moveNum - 1)
-		for ; int(in.count) < batchSizeCalc; in.count, moveIdx = in.count+1, moveIdx+1 {
-			in.Entries[in.count].Key = buf[moveIdx].Key
-			in.Entries[in.count].Value = buf[moveIdx].Value
-		}
-		var newHighKey interface{}
-		if idx < num {
-			newHighKey = keys[idx]
+			newNodes[newNum-1].HighKey = prevHighKey
+
+			return newNodes, nil
 		} else {
-			newHighKey = buf[moveIdx].Key
-		}
+			// case2: "插入到中间 (new_kvs + moved)"
 
-		totalNum := num - idx + moveNum - moveIdx
-		newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
+			moveIdx := 0
+			buf := make([]Entry, moveNum)
+			copy(buf, in.Entries[pos+1:pos+1+moveNum])
 
-		newNodes := make([]*INode, newNum)
-		for i := range newNodes {
-			newNodes[i] = NewINodeForInsertInBatch(in.level)
-		}
+			// fill [pos+1.. batchSizeCalc) with as many from keys/values
+			for i := pos + 1; i < batchSizeCalc && idx < num; i, idx = i+1, idx+1 {
+				in.Entries[i].Key = keys[idx]
+				in.Entries[i].Value = values[idx]
+			}
 
-		oldSibling := in.siblingPtr
-		in.siblingPtr = &newNodes[0].Node
-		for i := 0; i < newNum-1; i++ {
-			newNodes[i].siblingPtr = &newNodes[i+1].Node
-			// 调用重构后的 BatchInsertLastLevelWithMovement
-			_, _, err := newNodes[i].BatchInsertLastLevelWithMovement(
-				keys, values, idx, num, batchSizeCalc,
+			// c++ => cnt += (idx - move_num -1)
+			in.count += int32(idx - moveNum - 1)
+
+			for ; in.count < int32(batchSizeCalc) && moveIdx < moveNum; in.count, moveIdx = in.count+1, moveIdx+1 {
+				in.Entries[in.count].Key = buf[moveIdx].Key
+				in.Entries[in.count].Value = buf[moveIdx].Value
+			}
+
+			var newHighKey interface{}
+			if idx < num {
+				newHighKey = keys[idx]
+			} else {
+				newHighKey = buf[moveIdx].Key
+			}
+
+			totalNum := num - idx + moveNum - moveIdx
+			newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
+
+			newNodes := make([]*INode, newNum)
+			for i := range newNodes {
+				newNodes[i] = NewINodeForInsertInBatch(in.level)
+			}
+
+			oldSibling := in.siblingPtr
+			in.siblingPtr = &newNodes[0].Node
+
+			for i := 0; i < newNum-1; i++ {
+				newNodes[i].siblingPtr = &newNodes[i+1].Node
+				_, _, err := newNodes[i].BatchInsertLastLevelWithMovement(
+					keys, values, idx, num, batchSizeCalc,
+					buf, moveIdx, moveNum,
+				)
+				if err != nil {
+					return nil, err
+				}
+			}
+			newNodes[newNum-1].siblingPtr = oldSibling
+			_, _, err := newNodes[newNum-1].BatchInsertLastLevelWithMovement(
+				keys, values, idx, num, lastChunk,
 				buf, moveIdx, moveNum,
 			)
 			if err != nil {
 				return nil, err
 			}
+			newNodes[newNum-1].HighKey = newHighKey
+			return newNodes, nil
 		}
-		newNodes[newNum-1].siblingPtr = oldSibling
-		_, _, err := newNodes[newNum-1].BatchInsertLastLevelWithMovement(
-			keys, values, idx, num, lastChunk,
-			buf, moveIdx, moveNum,
-		)
-		if err != nil {
-			return nil, err
-		}
-		newNodes[newNum-1].HighKey = newHighKey
-		return newNodes, nil
 	}
 }
 
@@ -646,24 +704,39 @@ func (in *INode) InsertForRoot(keys []interface{}, values []NodeInterface, left 
 	}
 }
 
+// pos: 需要插入的位置，num: 需要插入的btreeNode数量，moveNum
 func (in *INode) moveNormalInsertion(pos, num, moveNum int) {
-	// 扩展 Entries 以保证 pos+num+1 的位置有效
-	if pos+num+1 > len(in.Entries) {
-		in.Entries = append(in.Entries, make([]Entry, pos+num+1-len(in.Entries))...)
+	// 1) 计算我们最终需要下标达到多少：
+	//    要腾出 [pos+1 .. pos+num] 的区域给新插入的 num 条目，
+	//    并且需要把 [pos+1.. pos+1+moveNum) 向后挪 num 个位置，
+	//    目标区间为 [pos+num+1 .. pos+num+1+moveNum)
+	//
+	//    因此我们可能要访问 in.Entries[pos+num + moveNum], 下标上限 pos+num+moveNum
+	//    例如: if pos=1, num=2, moveNum=0 => 需要访问 [pos+2] = [3], 这就可能超 len(in.Entries).
+
+	// 2) 先确保 slice 容量足够
+	neededIndex := pos + num + moveNum - 1 // +1 取决于具体写法, 见下
+	if neededIndex >= len(in.Entries) {
+		// 计算需要补多少
+		extra := (neededIndex + 1) - len(in.Entries)
+		in.Entries = append(in.Entries, make([]Entry, extra)...)
 	}
 
-	// 计算目标位置及需要移动的元素数量
-	targetPos := pos + num + 1
-	sourcePos := pos + 1
-
-	// 如果目标位置超出了当前 Entries 的大小，就需要扩展
-	if targetPos+moveNum > len(in.Entries) {
-		// 需要扩展 Entries 的大小
-		in.Entries = append(in.Entries, make([]Entry, targetPos+moveNum-len(in.Entries))...)
+	// 3) 如果 moveNum>0，则执行后移 copy
+	//    目标: [pos+num+1 .. pos+num+1+moveNum)
+	//    源  : [pos+1       .. pos+1+moveNum)
+	if moveNum > 0 {
+		// 同理再做一次 slice 容量校验(针对 pos+num+1+moveNum)
+		targetEnd := pos + num + moveNum
+		if targetEnd > len(in.Entries) {
+			extra := targetEnd - len(in.Entries)
+			in.Entries = append(in.Entries, make([]Entry, extra)...)
+		}
+		copy(
+			in.Entries[pos+num:pos+num+moveNum],
+			in.Entries[pos+1:pos+1+moveNum],
+		)
 	}
-
-	// 执行 copy 操作
-	copy(in.Entries[targetPos:], in.Entries[sourcePos:sourcePos+moveNum])
 }
 
 func (in *INode) RightmostPtr() *Node {
