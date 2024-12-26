@@ -753,7 +753,7 @@ batchLoop:
 			panic("expected INodeInterface for parent node")
 		}
 
-		var newNodes []*INode
+		var newNodes []INodeInterface
 		var err error
 		// 根据 parent 层级决定要调用哪个批量插入方法
 		if parent.GetLevel() == 1 {
@@ -761,7 +761,7 @@ batchLoop:
 			newNodes, err = parent.BatchInsertLastLevel(keys, values, num, 0)
 		} else {
 			// 内部节点
-			newNodes, err = parent.BatchInsert(keys, values, num)
+			//newNodes, err = parent.BatchInsert(keys, values, num)
 		}
 		if err != nil {
 			// 根据需要处理错误
@@ -780,25 +780,25 @@ batchLoop:
 		splitKey := make([]interface{}, newNum)
 		splitKey[0] = parent.GetHighKey()
 		for i := 1; i < newNum; i++ {
-			splitKey[i] = newNodes[i-1].HighKey
+			splitKey[i] = newNodes[i-1].GetHighKey()
 		}
 
 		if parent != bt.root {
 			// 非root, 递归插到更高层
 			parent.WriteUnlock()
-			bt.BatchInsert(splitKey, nodeInterfaceSlice(newNodes), newNum, parent, ti)
+			bt.BatchInsert(splitKey, nodeInterfaceForINodeInterface(newNodes), newNum, parent, ti)
 		} else {
 			// 若就是 root, 可能需要多层调整
 			// 参考C++逻辑: NewRootForAdjustment
 			for parent.GetCardinality() < newNum {
-				newRoots, newSize := bt.NewRootForAdjustment(splitKey, nodeInterfaceSlice(newNodes), newNum)
+				newRoots, newSize := bt.NewRootForAdjustment(splitKey, nodeInterfaceForINodeInterface(newNodes), newNum)
 				newNodes = newRoots
 				newNum = newSize
 			}
 
 			// 生成新根
 			newRoot := NewINodeForInsertInBatch(newNodes[0].GetLevel() + 1)
-			newRoot.InsertForRoot(splitKey, nodeInterfaceSlice(newNodes), parent.GetNode(), newNum)
+			newRoot.InsertForRoot(splitKey, nodeInterfaceForINodeInterface(newNodes), parent.GetNode(), newNum)
 			bt.root = newRoot
 			parent.WriteUnlock()
 		}
@@ -806,7 +806,7 @@ batchLoop:
 	}
 }
 
-func (bt *BTree) NewRootForAdjustment(key []interface{}, value []NodeInterface, num int) ([]*INode, int) {
+func (bt *BTree) NewRootForAdjustment(key []interface{}, value []NodeInterface, num int) ([]INodeInterface, int) {
 	// 在C++中FILL_FACTOR使用宏定义，这里您可自行定义FILL_FACTOR常量
 	// 假设FILL_FACTOR为0.7或其他值，根据实际情况定义
 	batch_size := int(float64(value[0].GetCount()) * FillFactor)
@@ -818,7 +818,7 @@ func (bt *BTree) NewRootForAdjustment(key []interface{}, value []NodeInterface, 
 		new_num = num/batch_size + 1
 	}
 
-	new_roots := make([]*INode, new_num)
+	new_roots := make([]INodeInterface, new_num)
 	//idx := 0
 	for i := 0; i < new_num; i++ {
 		// 假设level+1
@@ -829,14 +829,13 @@ func (bt *BTree) NewRootForAdjustment(key []interface{}, value []NodeInterface, 
 		// 根据之前逻辑实现:
 		//new_roots[i].BatchInsertForRoot(key, value, &idx, num, batch_size)
 		if i < new_num-1 {
-			new_roots[i].siblingPtr = new_roots[i+1]
+			new_roots[i].SetSibling(new_roots[i+1])
 		}
 	}
 	return new_roots, new_num
 }
 
-// nodeInterfaceSlice 将[]*INode转换为[]NodeInterface
-func nodeInterfaceSlice(nodes []*INode) []NodeInterface {
+func nodeInterfaceForINodeInterface(nodes []INodeInterface) []NodeInterface {
 	res := make([]NodeInterface, len(nodes))
 	for i, n := range nodes {
 		res[i] = n
@@ -970,12 +969,12 @@ rangeLoop:
 				leaf.WriteUnlock()
 				continue rangeLoop
 			} else if retCode == NeedConvert {
-				//fmt.Println("需要将LNodeHash转换为LNodeBtree,LeafNode:")
-				//printNode(leaf, "", false)
-				//bt.PrintTree()
+				fmt.Println("需要将LNodeHash转换为LNodeBtree,LeafNode:")
+				printNode(leaf, "", false)
+				bt.PrintTree()
 				bt.convert(leaf, leafVersion, ti)
-				//fmt.Println("转换完成，打印Tree")
-				//bt.PrintTree()
+				fmt.Println("转换完成，打印Tree")
+				bt.PrintTree()
 				leaf.WriteUnlock()
 				continue rangeLoop
 			}

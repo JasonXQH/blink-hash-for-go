@@ -33,6 +33,7 @@ type INodeInterface interface {
 	NodeScanner
 	FullJudger
 	SetHighKey(key interface{})
+	SetSibling(sibling INodeInterface)
 }
 
 //type LeafNodeInterface interface {
@@ -131,8 +132,27 @@ type CardinalityGetter interface {
 }
 
 type BatchInsertable interface {
-	BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]*INode, error)
-	BatchInsert(keys []interface{}, values []NodeInterface, num int) ([]*INode, error)
+	BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]INodeInterface, error)
+	BatchInsertLastLevelWithMovement(
+		keys []interface{}, values []NodeInterface, idx int, num int, batchSize int, // 键值对
+		buf []Entry, bufIdx int, bufNum int, // 缓冲区
+	) (int, int, error)
+	BatchInsertLastLevelWithMigrationAndMovement(
+		migrate []Entry, migrateIdx int, migrateNum int,
+		keys []interface{}, values []NodeInterface, idx int, num int, batchSize int,
+		buf []Entry, bufIdx int, bufNum int,
+	) (int, int, error)
+
+	BatchInsert(keys []interface{}, values []NodeInterface, num int) ([]INodeInterface, error)
+	BatchInsertWithMigrationAndMovement(
+		migrate []Entry, migrateIdx int, migrateNum int,
+		keys []interface{}, values []NodeInterface, idx int, num int,
+		batchSize int, buf []Entry, bufIdx int, bufNum int,
+	) (int, int, error)
+	BatchInsertWithMovement(
+		keys []interface{}, values []NodeInterface, idx int, num int,
+		batchSize int, buf []Entry, bufIdx int, bufNum int,
+	) (int, int, error)
 }
 
 type SiblingSetter interface {

@@ -468,7 +468,7 @@ func (in *INode) BatchInsertLastLevelWithMovement(
 
 // BatchInsertLastLevel 批量插入到叶子节点，包括迁移和缓冲区处理
 // 返回新节点集合、新Num 和错误（如果有）
-func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]*INode, error) {
+func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface, num int, batchSize int) ([]INodeInterface, error) {
 	pos := in.FindLowerBound(keys[0])
 	batchSizeCalc := int(float64(in.Cardinality) * FillFactor)
 	// 原版: bool inplace = ((cnt + num) < cardinality);
@@ -526,22 +526,27 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 			return nil, nil
 		}
 	} else {
+
 		// need split / migration
 		prevHighKey := in.HighKey
 
 		// first, set leftmostPtr or entry[pos].value = values[0]
 		if pos < 0 {
-			in.leftmostPtr = values[0]
+			in.leftmostPtr = values[idx]
+			idx++
 		} else {
-			in.Entries[pos].Value = values[0]
+			in.Entries[pos].Value = values[idx]
+			idx++
 		}
 
 		// we go into 2 big branches in c++:
 		// if (batchSize < pos) { ... } else { ... }
-
 		if batchSizeCalc < pos {
 			// case1: "插入到中间 (migrated + new kvs + moved)"
-
+			/*
+				如果插入位置 pos 大于一个阈值（例如 batchSizeCalc，或 batch_size），可能意味着你要插入的位置更偏右，
+				从而会把当前结点先留一部分条目，然后有相当多的 old entry 以及新的 (key, value) 都去放入新的结点；
+			*/
 			migrateNum := pos - batchSizeCalc
 			// allocate slice
 			migrate := make([]Entry, migrateNum)
@@ -555,13 +560,13 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 			totalNum := num + moveNum + migrateNum
 			newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
 
-			newNodes := make([]*INode, newNum)
+			newNodes := make([]INodeInterface, newNum)
 			for i := 0; i < newNum; i++ {
 				newNodes[i] = NewINodeForInsertInBatch(in.level)
 			}
 
-			oldSibling := in.siblingPtr
-			in.siblingPtr = &newNodes[0].Node
+			oldSibling := in.siblingPtr.(INodeInterface)
+			in.siblingPtr = newNodes[0]
 
 			migrateIdx := 0
 			bufIdx := 0
@@ -573,7 +578,7 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 
 			// fill each newNodes[i] except last one
 			for i := 0; i < newNum-1; i++ {
-				newNodes[i].siblingPtr = &newNodes[i+1].Node
+				newNodes[i].SetSibling(newNodes[i+1])
 				// call BatchInsertLastLevelWithMigrationAndMovement
 				migIdx, bfIdx, err := newNodes[i].BatchInsertLastLevelWithMigrationAndMovement(
 					migrate, migrateIdx, migrateNum,
@@ -587,7 +592,7 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 				bufIdx = bfIdx
 			}
 
-			newNodes[newNum-1].siblingPtr = oldSibling
+			newNodes[newNum-1].SetSibling(oldSibling)
 			_, _, err := newNodes[newNum-1].BatchInsertLastLevelWithMigrationAndMovement(
 				migrate, migrateIdx, migrateNum,
 				keys, values, idx, num, lastChunk,
@@ -596,20 +601,24 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 			if err != nil {
 				return nil, err
 			}
-			newNodes[newNum-1].HighKey = prevHighKey
+			newNodes[newNum-1].SetHighKey(prevHighKey)
 
 			return newNodes, nil
 		} else {
 			// case2: "插入到中间 (new_kvs + moved)"
-
+			/*
+				如果 pos 不大于这个阈值，表示你要插入的位置不那么靠后，只需要把右边部分“moved”到新结点，也就是 Case2（new_kvs + moved）。
+			*/
 			moveIdx := 0
+			//需要移动的部分，先存入buf
 			buf := make([]Entry, moveNum)
 			copy(buf, in.Entries[pos+1:pos+1+moveNum])
 
 			// fill [pos+1.. batchSizeCalc) with as many from keys/values
-			for i := pos + 1; i < batchSizeCalc && idx < num; i, idx = i+1, idx+1 {
+			for i := pos + 1; i < batchSizeCalc && idx < num; i++ {
 				in.Entries[i].Key = keys[idx]
 				in.Entries[i].Value = values[idx]
+				idx++
 			}
 
 			// c++ => cnt += (idx - move_num -1)
@@ -630,16 +639,16 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 			totalNum := num - idx + moveNum - moveIdx
 			newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSizeCalc)
 
-			newNodes := make([]*INode, newNum)
+			newNodes := make([]INodeInterface, newNum)
 			for i := range newNodes {
 				newNodes[i] = NewINodeForInsertInBatch(in.level)
 			}
 
-			oldSibling := in.siblingPtr
-			in.siblingPtr = &newNodes[0].Node
+			oldSibling := in.siblingPtr.(INodeInterface)
+			in.siblingPtr = newNodes[0]
 
 			for i := 0; i < newNum-1; i++ {
-				newNodes[i].siblingPtr = &newNodes[i+1].Node
+				newNodes[i].SetSibling(newNodes[i+1])
 				_, _, err := newNodes[i].BatchInsertLastLevelWithMovement(
 					keys, values, idx, num, batchSizeCalc,
 					buf, moveIdx, moveNum,
@@ -648,7 +657,7 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 					return nil, err
 				}
 			}
-			newNodes[newNum-1].siblingPtr = oldSibling
+			newNodes[newNum-1].SetSibling(oldSibling)
 			_, _, err := newNodes[newNum-1].BatchInsertLastLevelWithMovement(
 				keys, values, idx, num, lastChunk,
 				buf, moveIdx, moveNum,
@@ -656,7 +665,8 @@ func (in *INode) BatchInsertLastLevel(keys []interface{}, values []NodeInterface
 			if err != nil {
 				return nil, err
 			}
-			newNodes[newNum-1].HighKey = newHighKey
+			//TODO 应该有点错误的这里
+			newNodes[newNum-1].SetHighKey(newHighKey)
 			return newNodes, nil
 		}
 	}
@@ -900,10 +910,10 @@ func (in *INode) BatchInsertWithMovement(
 // 返回新节点集合和错误（如果有）
 func (in *INode) BatchInsert(
 	keys []interface{}, values []NodeInterface, num int,
-) ([]*INode, error) {
+) ([]INodeInterface, error) {
 	pos := in.FindLowerBound(keys[0])
 	batchSize := int(float64(in.Cardinality) * FillFactor)
-	inPlace := (int(in.count) + num) < in.Cardinality
+	inPlace := (int(in.count) + num - 1) <= in.Cardinality
 	moveNum := 0
 	idx := 0
 
@@ -944,14 +954,14 @@ func (in *INode) BatchInsert(
 		newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSize)
 
 		// Create new sibling nodes
-		newNodes := make([]*INode, newNum)
+		newNodes := make([]INodeInterface, newNum)
 		for i := 0; i < newNum; i++ {
 			newNodes[i] = NewINodeForInsertInBatch(in.level)
 		}
 
 		// Adjust sibling pointers
-		oldSibling := in.siblingPtr
-		in.siblingPtr = &newNodes[0].Node
+		oldSibling := in.siblingPtr.(INodeInterface)
+		in.siblingPtr = newNodes[0]
 
 		// Insert data into sibling nodes
 		migrateIdx, moveIdx := 0, 0
@@ -961,7 +971,7 @@ func (in *INode) BatchInsert(
 		}
 
 		for i := 0; i < newNum-1; i++ {
-			newNodes[i].siblingPtr = &newNodes[i+1].Node
+			newNodes[i].SetSibling(newNodes[i+1])
 			var err error
 			migrateIdx, moveIdx, err = newNodes[i].BatchInsertWithMigrationAndMovement(
 				migrate, migrateIdx, migrateNum,
@@ -974,8 +984,8 @@ func (in *INode) BatchInsert(
 		}
 
 		// Last node adjustments
-		newNodes[newNum-1].siblingPtr = oldSibling
-		newNodes[newNum-1].HighKey = prevHighKey
+		newNodes[newNum-1].SetSibling(oldSibling)
+		newNodes[newNum-1].SetHighKey(prevHighKey)
 		_, _, err := newNodes[newNum-1].BatchInsertWithMigrationAndMovement(
 			migrate, migrateIdx, migrateNum,
 			keys, values, idx, num,
@@ -1022,18 +1032,18 @@ func (in *INode) BatchInsert(
 	newNum, lastChunk := in.CalculateNodeNum(totalNum, batchSize)
 
 	// Create new sibling nodes
-	newNodes := make([]*INode, newNum)
+	newNodes := make([]INodeInterface, newNum)
 	for i := 0; i < newNum; i++ {
 		newNodes[i] = NewINodeForInsertInBatch(in.level)
 	}
 
 	// Adjust sibling pointers
-	oldSibling := in.siblingPtr
-	in.siblingPtr = &newNodes[0].Node
+	oldSibling := in.siblingPtr.(INodeInterface)
+	in.siblingPtr = newNodes[0]
 
 	// Insert data into sibling nodes
 	for i := 0; i < newNum-1; i++ {
-		newNodes[i].siblingPtr = &newNodes[i+1].Node
+		newNodes[i].SetSibling(newNodes[i+1])
 		var err error
 		idx, moveIdx, err = newNodes[i].BatchInsertWithMovement(
 			keys, values, idx, num, batchSize, bufEntries, moveIdx, moveNum,
@@ -1044,8 +1054,8 @@ func (in *INode) BatchInsert(
 	}
 
 	// Last node adjustments
-	newNodes[newNum-1].siblingPtr = oldSibling
-	newNodes[newNum-1].HighKey = prevHighKey
+	newNodes[newNum-1].SetSibling(oldSibling)
+	newNodes[newNum-1].SetHighKey(prevHighKey)
 	_, _, err := newNodes[newNum-1].BatchInsertWithMovement(
 		keys, values, idx, num, lastChunk, bufEntries, moveIdx, moveNum,
 	)
@@ -1074,4 +1084,7 @@ func (n *INode) GetType() NodeType {
 }
 func (n *INode) GetCardinality() int {
 	return n.Cardinality
+}
+func (n *INode) SetSibling(sibling INodeInterface) {
+	n.siblingPtr = sibling
 }
