@@ -1246,7 +1246,7 @@ func (lh *LNodeHash) Convert(version uint64) ([]*LNodeBTree, int, error) {
 
 	// 对第一个叶节点加写锁
 	if num > 0 {
-		leaves[0].WriteLock()
+		leaves[0].TryWriteLock()
 	}
 
 	// 更新左兄弟节点的兄弟指针

@@ -124,14 +124,42 @@ func (n *Node) WriteLock() {
 	}
 }
 
+// // TryWriteLock 尝试获取写锁，如果成功返回 true
+//func (n *Node) TryWriteLock() bool {
+//	version := atomic.LoadUint64(&n.lock)
+//	if n.IsLocked(version) || n.IsObsolete(version) {
+//		runtime.Gosched() // 让出时间片，相当于 _mm_pause()
+//		return false
+//	}
+//	return atomic.CompareAndSwapUint64(&n.lock, version, version+0b10)
+//}
+
 // TryWriteLock 尝试获取写锁，如果成功返回 true
 func (n *Node) TryWriteLock() bool {
+	// 获取调用者信息：上层函数(1级跳过)
+	//callerFunc, callerFile, callerLine := getCallerInfo(2)
+
 	version := atomic.LoadUint64(&n.lock)
-	if n.IsLocked(version) || n.IsObsolete(version) {
-		runtime.Gosched() // 让出时间片，相当于 _mm_pause()
+	locked := n.IsLocked(version)
+	obsolete := n.IsObsolete(version)
+
+	//lockDebugLog("[TryWriteLock] => Called by %s (%s:%d); node=%p, oldVersion=%d, locked=%v, obsolete=%v",
+	//	callerFunc, callerFile, callerLine, n, version, locked, obsolete)
+
+	if locked || obsolete {
+		runtime.Gosched() // 让出时间片
+		//lockDebugLog("[TryWriteLock] => FAIL locked=%v or obsolete=%v, node=%p", locked, obsolete, n)
 		return false
 	}
-	return atomic.CompareAndSwapUint64(&n.lock, version, version+0b10)
+
+	swapped := atomic.CompareAndSwapUint64(&n.lock, version, version+0b10)
+	if swapped {
+		//lockDebugLog("[TryWriteLock] => SUCCESS node=%p, newVersion=%d (old=%d)", n, version+0b10, version)
+	} else {
+		//lockDebugLog("[TryWriteLock] => CAS FAIL node=%p, oldVersion=%d changed", n, version)
+		runtime.Gosched()
+	}
+	return swapped
 }
 
 // WriteUnlock 释放写锁
@@ -161,22 +189,50 @@ func (n *Node) GetEntries() []Entry {
 	return nil
 }
 
-// TryUpgradeWriteLock 尝试升级写锁，如果版本不匹配或不能锁定则设置需要重启标志
+// // TryUpgradeWriteLock 尝试升级写锁，如果版本不匹配或不能锁定则设置需要重启标志
+//func (n *Node) TryUpgradeWriteLock(version uint64) (bool, bool) {
+//	needRestart := false
+//	currentVersion := atomic.LoadUint64(&n.lock)
+//	if version != currentVersion {
+//		needRestart = true
+//		return false, needRestart
+//	}
+//
+//	// 尝试进行原子更新，增加 0b10 表示获取写锁
+//	if !atomic.CompareAndSwapUint64(&n.lock, version, version+0b10) {
+//		runtime.Gosched() // 让出时间片，相当于 _mm_pause()
+//		needRestart = true
+//	}
+//	return !needRestart, needRestart
+//}
+
+// TryUpgradeWriteLock 尝试升级写锁，如果版本不匹配或不能锁定则设置needRestart
 func (n *Node) TryUpgradeWriteLock(version uint64) (bool, bool) {
+	callerFunc, callerFile, callerLine := getCallerInfo(2)
+
+	lockDebugLog("[TryUpgradeWriteLock] => Called by %s (%s:%d); node=%p, oldVer=%d",
+		callerFunc, callerFile, callerLine, n, version)
+
 	needRestart := false
 	currentVersion := atomic.LoadUint64(&n.lock)
 	if version != currentVersion {
+		lockDebugLog("[TryUpgradeWriteLock] => NEED RESTART: version mismatch node=%p v=%d cur=%d",
+			n, version, currentVersion)
 		needRestart = true
 		return false, needRestart
 	}
 
-	// 尝试进行原子更新，增加 0b10 表示获取写锁
-	if !atomic.CompareAndSwapUint64(&n.lock, version, version+0b10) {
-		runtime.Gosched() // 让出时间片，相当于 _mm_pause()
+	swapped := atomic.CompareAndSwapUint64(&n.lock, version, version+0b10)
+	if !swapped {
+		lockDebugLog("[TryUpgradeWriteLock] => CAS FAIL node=%p oldVer=%d changed", n, version)
+		runtime.Gosched()
 		needRestart = true
+	} else {
+		lockDebugLog("[TryUpgradeWriteLock] => SUCCESS node=%p newVer=%d", n, version+0b10)
 	}
-	return !needRestart, needRestart
+	return swapped, needRestart
 }
+
 func (n *Node) IncrementCount() {
 	atomic.AddInt32(&n.count, 1)
 }

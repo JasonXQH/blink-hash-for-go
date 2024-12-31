@@ -1,5 +1,11 @@
 package blinkhash
 
+import (
+	"log"
+	"runtime"
+	"unsafe"
+)
+
 const (
 	BASENode  NodeType = iota
 	INNERNode NodeType = iota
@@ -85,25 +91,48 @@ const (
 )
 
 // prod
-//const (
-//	LNodeHashCardinality  = (LeafHashSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Bucket{}))
-//	LNodeBTreeCardinality = (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
-//	INodeCardinality      = int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
-//	EntryNum              = 32
-//	PageSize              = 512 // 示例页大小，具体值应根据实际情况调整
-//	HashFuncsNum          = 2
-//	NumSlot               = 4
-//	Adaption              = true //lnodeHash是否需要转换为bNode
-//)
-
-// dev
 const (
-	LNodeHashCardinality  = 4
-	LNodeBTreeCardinality = 8
-	INodeCardinality      = 4
-	EntryNum              = 2
-	PageSize              = 4
-	HashFuncsNum          = 1
-	NumSlot               = 2
+	LNodeHashCardinality  = (LeafHashSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Bucket{}))
+	LNodeBTreeCardinality = (LeafBTreeSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(uintptr(0)))) / int(unsafe.Sizeof(Entry{}))
+	INodeCardinality      = int((PageSize - int(unsafe.Sizeof(Node{})) - int(unsafe.Sizeof(new(interface{})))) / int(unsafe.Sizeof(Entry{})))
+	EntryNum              = 32
+	PageSize              = 512 // 示例页大小，具体值应根据实际情况调整
+	HashFuncsNum          = 2
+	NumSlot               = 4
 	Adaption              = true //lnodeHash是否需要转换为bNode
 )
+
+// dev
+// const (
+//
+//	LNodeHashCardinality  = 4
+//	LNodeBTreeCardinality = 8
+//	INodeCardinality      = 4
+//	EntryNum              = 2
+//	PageSize              = 4
+//	HashFuncsNum          = 1
+//	NumSlot               = 2
+//	Adaption              = true //lnodeHash是否需要转换为bNode
+//
+// )
+var EnableLockDebug = false // 全局开关，控制是否输出锁调试日志
+
+func lockDebugLog(format string, args ...interface{}) {
+	if EnableLockDebug {
+		log.Printf(format, args...)
+	}
+}
+func getCallerInfo(skip int) (funcName, fileName string, line int) {
+	// skip 表示要跳过的栈帧层数，一般我们在锁函数内调用 getCallerInfo(1)，
+	// 就能获取到上层调用者的信息。
+	pc, file, line, ok := runtime.Caller(skip)
+	if !ok {
+		return "unknownFunc", "unknownFile", 0
+	}
+	fn := runtime.FuncForPC(pc)
+	funcName = "unknownFunc"
+	if fn != nil {
+		funcName = fn.Name() // 带包路径的函数名
+	}
+	return funcName, file, line
+}

@@ -122,7 +122,11 @@ func (in *INode) FindLowerBound(key interface{}) int {
 	}
 
 	for index, entry := range in.Entries[:in.count] {
-		if entry.Key.(int) >= keyInt {
+		entryKey, ok := entry.Key.(int)
+		if !ok {
+			panic(fmt.Sprintf("entry key must be int, got %T", entry.Key))
+		}
+		if entryKey >= keyInt {
 			return index - 1
 		}
 	}
@@ -256,7 +260,7 @@ func (in *INode) BatchMigrate(migrate []Entry, migrateIdx int, migrateNum int) (
 	}
 
 	// 更新 leftmost_ptr
-	in.leftmostPtr = migrate[migrateIdx].Value.(*Node)
+	in.leftmostPtr = migrate[migrateIdx].Value.(NodeInterface)
 	migrateIdx++
 
 	// 计算需要复制的条目数
@@ -398,7 +402,7 @@ func (in *INode) BatchInsertLastLevelWithMigrationAndMovement(
 	if bufIdx < bufNum && int(in.count) < batchSize {
 		if fromStart {
 			// 从缓冲区开始插入，更新 leftmost_ptr
-			in.leftmostPtr = buf[bufIdx].Value.(*Node)
+			in.leftmostPtr = buf[bufIdx].Value.(NodeInterface)
 			bufIdx++
 		}
 		// 批量插入缓冲区条目
@@ -808,11 +812,11 @@ func (in *INode) moveNormalInsertionForInnerNode(pos, num, moveNum int) {
 	}
 }
 
-func (in *INode) RightmostPtr() *Node {
+func (in *INode) RightmostPtr() NodeInterface {
 	if in.count == 0 {
 		return nil
 	}
-	return in.Entries[in.count-1].Value.(*Node)
+	return in.Entries[in.count-1].Value.(NodeInterface)
 }
 
 func (in *INode) Print() {
@@ -902,7 +906,7 @@ func (in *INode) BatchInsertWithMigrationAndMovement(
 	// 如果还有缓冲区条目需要插入，并且当前节点未满
 	if bufIdx < bufNum && int(in.count) < batchSize {
 		if fromStart {
-			in.leftmostPtr = buf[bufIdx].Value.(*Node)
+			in.leftmostPtr = buf[bufIdx].Value.(NodeInterface)
 			bufIdx++
 		}
 		var _ bool
@@ -923,7 +927,7 @@ func (in *INode) BatchInsertWithMovement(
 	// 批量插入键值对
 	if idx < num {
 		fromStart = false
-		in.leftmostPtr = values[idx]
+		in.leftmostPtr = values[idx].(INodeInterface)
 		idx++
 		if idx < num {
 			var reached bool
@@ -947,7 +951,7 @@ func (in *INode) BatchInsertWithMovement(
 	// 从缓冲区插入键值对
 	if bufIdx < bufNum && int(in.count) < batchSize {
 		if fromStart {
-			in.leftmostPtr = buf[bufIdx].Value.(*Node)
+			in.leftmostPtr = buf[bufIdx].Value.(INodeInterface)
 			bufIdx++
 		}
 		var _ bool

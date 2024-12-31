@@ -343,6 +343,9 @@ func (lb *LNodeBTree) RangeLookUp(key interface{}, upTo int, continued bool, ver
 
 	// 如果 continued == true，表示我们之前已经搜到一部分了，这次无视 key，直接遍历
 	if continued {
+		if int(lb.count) > len(lb.Entries) {
+			panic(fmt.Sprintf("lb.count: %d len(lb.Entries): %d", lb.count, len(lb.Entries)))
+		}
 		for i := 0; i < int(lb.count); i++ {
 			collected = append(collected, lb.Entries[i].Value)
 			currentCount++
@@ -356,6 +359,9 @@ func (lb *LNodeBTree) RangeLookUp(key interface{}, upTo int, continued bool, ver
 		pos := lb.FindLowerBound(key)
 		// 假设: FindLowerBound 返回小于等于 key 的位置,
 		// 我们希望从 pos+1 开始收集
+		if int(lb.count) > len(lb.Entries) {
+			panic(fmt.Sprintf("lb.count: %d len(lb.Entries): %d", lb.count, len(lb.Entries)))
+		}
 		for i := pos + 1; i < int(lb.count); i++ {
 			collected = append(collected, lb.Entries[i].Value)
 			currentCount++

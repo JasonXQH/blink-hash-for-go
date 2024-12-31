@@ -20,7 +20,7 @@ func SingleThreadTest() {
 	ti := blinkhash.NewThreadInfo(tree.GetEpoche())
 
 	//half := numData / 2
-	half := 1
+	half := 10000
 
 	// Warmup
 	fmt.Println("Warmup starts (single thread)")
@@ -35,8 +35,8 @@ func SingleThreadTest() {
 	// 比如：只测试 RangeLookup
 	fmt.Println("Single-thread RangeLookups start")
 	start = time.Now()
-	for i := 0; i < 100; i++ {
-		_ = tree.RangeLookup(keys[0], 100, ti)
+	for i := 0; i < half; i++ {
+		_ = tree.RangeLookup(keys[0], numData/2, ti)
 		//fmt.Printf("RangeLookup minKey=%v", keys[i])
 		//results := tree.RangeLookup(keys[i], 100, ti)
 		//fmt.Printf("RangeLookup minKey=%v got %d results: %v\n", keys[i], len(results), results)

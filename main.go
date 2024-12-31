@@ -10,11 +10,12 @@ import (
 
 func main() {
 	// 模拟命令行参数
-	os.Args = append(os.Args, "100", "1", "50") // 比如 num_data=10000, num_threads=4, insert_ratio=50
+	os.Args = append(os.Args, "2000", "4", "50") // 比如 num_data=10000, num_threads=4, insert_ratio=50
 	//var _ blinkhash.INodeInterface = (*blinkhash.LNodeHash)(nil)
 	//test.InsertTest()
 	// 调用 MixedTest
-	test.SingleThreadTest()
+	//test.SingleThreadTest()
+	test.MixedTest()
 	//
 	//test.RangeTest()
 	//

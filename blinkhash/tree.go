@@ -2,6 +2,7 @@ package blinkhash
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 	"unsafe"
 )
@@ -91,7 +92,7 @@ insertLoop: // 标签
 
 		// Check if we need to traverse to the sibling leaf node.
 		for leafNode.GetSiblingPtr() != nil && compareIntKeys(leafNode.GetHighKey(), key) < 0 {
-			sibling, ok := leafNode.GetSiblingPtr().(*LNodeHash)
+			sibling, ok := leafNode.GetSiblingPtr().(LeafNodeInterface)
 			if !ok {
 				panic("expected *LNodeHash")
 			}
@@ -292,126 +293,147 @@ insertLoop: // 标签
 			}
 
 		}
-
 	}
 }
 
 // insertKey is called when the root has been split by another thread.
 // It inserts a key and node pointers into the B-tree.
 func (bt *BTree) insertKey(key interface{}, value NodeInterface, prev NodeInterface) {
+
+insertLoop:
 	for {
-		restart := false
 		cur := bt.root
 		// 尝试获取根节点的读锁
 		curVersionStart, needRestart := cur.TryReadLock()
 		if needRestart {
-			continue
+			// root锁没拿到 -> 重试
+			continue insertLoop
 		}
 
-		parent, ok := cur.(INodeInterface)
+		parentIF, ok := cur.(INodeInterface)
 		if !ok {
-			panic("expected *INode")
+			// 解锁后panic
+			cur.WriteUnlock()
+			panic("expected INodeInterface")
 		}
-
 		// 遍历树，找到 level = prev.level + 1 的内部节点
-		for parent.GetLevel() != prev.GetLevel()+1 {
-			child := parent.ScanNode(key)
-			childVersion, needRestart := child.TryReadLock()
-			if needRestart {
-				restart = true
-				break
+		for parentIF.GetLevel() != prev.GetLevel()+1 {
+			child := parentIF.ScanNode(key)
+			if child == nil {
+				// 解锁 -> panic
+				parentIF.WriteUnlock()
+				cur.WriteUnlock()
+				panic("ScanNode returned nil")
 			}
-
-			// 检查版本一致性
-			curEndVersion, needRestart := cur.GetVersion()
-			if needRestart || curVersionStart != curEndVersion {
-				restart = true
-				break
+			childVersion, cNeedRestart := child.TryReadLock()
+			if cNeedRestart {
+				// 解锁 -> 重试
+				parentIF.WriteUnlock()
+				cur.WriteUnlock()
+				continue insertLoop
 			}
+			// 版本一致性检查
+			curEndVersion, verNeedRestart := cur.GetVersion()
+			if verNeedRestart || (curVersionStart != curEndVersion) {
+				child.WriteUnlock()
+				parentIF.WriteUnlock()
+				cur.WriteUnlock()
+				continue insertLoop
+			}
+			// 下探：先解锁parent & cur
+			parentIF.WriteUnlock()
+			cur.WriteUnlock()
 
+			// 下探
 			cur = child
 			curVersionStart = childVersion
-		}
 
-		if restart {
-			continue
+			// 更新 parentIF
+			pIF, ok := cur.(INodeInterface)
+			if !ok {
+				cur.WriteUnlock()
+				panic("expected INodeInterface in insertKey down path")
+			}
+			parentIF = pIF
 		}
-
 		// 查找需要插入的位置
-		for parent.GetSiblingPtr() != nil && compareIntKeys(parent.GetHighKey(), key) < 0 {
-			sibling := parent.GetSiblingPtr()
-
-			siblingVersionStart, needRestart := sibling.TryReadLock()
-			if needRestart {
-				restart = true
-				break
+		for parentIF.GetSiblingPtr() != nil && compareIntKeys(parentIF.GetHighKey(), key) < 0 {
+			sibling := parentIF.GetSiblingPtr()
+			siblingVersionStart, sNeedRestart := sibling.TryReadLock()
+			if sNeedRestart {
+				// 解锁 -> 重试
+				parentIF.WriteUnlock()
+				cur.WriteUnlock()
+				continue insertLoop
 			}
 
-			parentEndVersion, needRestart := parent.GetVersion()
-			if needRestart || curVersionStart != parentEndVersion {
-				restart = true
-				break
+			parentEndVersion, pNeedRestart := parentIF.GetVersion()
+			if pNeedRestart || curVersionStart != parentEndVersion {
+				sibling.WriteUnlock()
+				parentIF.WriteUnlock()
+				cur.WriteUnlock()
+				continue insertLoop
 			}
+			// 下一个兄弟
+			parentIF.WriteUnlock()
+			cur.WriteUnlock()
 
-			parent = sibling.(*INode)
+			parentIF = sibling.(INodeInterface)
+			cur = sibling
 			curVersionStart = siblingVersionStart
 		}
 
-		if restart {
-			continue
-		}
-
 		// 尝试升级为写锁
-		success, needRestart := parent.TryUpgradeWriteLock(curVersionStart)
+		success, needRestart := parentIF.TryUpgradeWriteLock(curVersionStart)
 		if needRestart || !success {
+			// 升级失败 -> 解锁 -> 重试
+			parentIF.WriteUnlock()
 			continue
 		}
 
 		// 解锁 prev 节点
 		prev.WriteUnlock()
 
-		if !ok {
-			panic("Except type *Node")
-		}
 		// 检查父节点是否已满
-		if !parent.IsFull() {
-			err := parent.Insert(key, value, parent.GetLock())
+		if !parentIF.IsFull() {
+			err := parentIF.Insert(key, value, parentIF.GetLock())
 			if err != InsertSuccess {
+				parentIF.WriteUnlock()
 				panic("parent.Insert failed!")
 				return
 			}
-			parent.WriteUnlock()
+			parentIF.WriteUnlock()
 			return
 		} else {
 			// 父节点分裂
-			newParent, splitKey := parent.Split()
+			newParent, splitKey := parentIF.Split()
 			if !ok {
 				panic("newParentSplittableInterface cannot be INode")
 
 			}
 			if compareIntKeys(key, splitKey) <= 0 {
-				err := parent.Insert(key, value, parent.GetLock())
+				err := parentIF.Insert(key, value, parentIF.GetLock())
 				if err != InsertSuccess {
+					parentIF.WriteUnlock()
 					panic("parent.Insert failed!")
-					return
 				}
 			} else {
 				err := newParent.Insert(key, value, newParent.GetLock())
 				if err != InsertSuccess {
+					parentIF.WriteUnlock()
 					panic("parent.Insert failed!")
-					return
 				}
 			}
 
-			if parent == bt.root {
+			if parentIF == bt.root {
 				// 创建新的根节点.newParent成为了INodeInterface
-				newRoot := NewINodeForHeightGrowth(splitKey, parent, newParent, nil, parent.GetLevel()+1, parent.GetHighKey())
+				newRoot := NewINodeForHeightGrowth(splitKey, parentIF, newParent, nil, parentIF.GetLevel()+1, parentIF.GetHighKey())
 				bt.root = newRoot
-				parent.WriteUnlock()
+				parentIF.WriteUnlock()
 			} else {
-				node := cur
-				// 递归插入到更高层
-				bt.insertKey(splitKey, newParent, node)
+				// 递归插到更高层
+				parentIF.WriteUnlock()
+				bt.insertKey(splitKey, newParent, cur)
 			}
 		}
 	}
@@ -638,76 +660,71 @@ func (bt *BTree) BatchInsert(keys []interface{}, values []NodeInterface, num int
 
 batchLoop:
 	for {
-		restart := false
-
+		// 1) 尝试对 root 节点加读锁
 		cur := bt.root
 		curVersion, needRestart := cur.TryReadLock()
 		if needRestart {
+			// 没拿到 root 锁就重启
 			continue batchLoop
 		}
-		// 确保若发生 restart，需要释放对 cur 的锁
-		defer func() {
-			if restart {
-				cur.WriteUnlock()
-			}
-		}()
 
-		// 下探到 `prev` 的父层级 => level = prev.GetLevel() + 1
+		// 2) 下探到 `prev` 的父层级 => level = prev.GetLevel() + 1
 		for cur.GetLevel() != (prev.GetLevel() + 1) {
 			parent, ok := cur.(INodeInterface)
 			if !ok {
+				// 出现异常类型 -> 解锁后panic
+				cur.WriteUnlock()
 				panic("expected INodeInterface for parent node")
 			}
 			child := parent.ScanNode(keys[0])
 			if child == nil {
+				// 解锁 parent 和 cur
+				parent.WriteUnlock()
+				cur.WriteUnlock()
 				panic("ScanNode returned nil")
 			}
 
-			childVersion, needRestart := child.TryReadLock()
-			if needRestart {
-				restart = true
-				break
+			childVersion, cNeedRestart := child.TryReadLock()
+			if cNeedRestart {
+				// 解锁 parent & cur -> 重启
+				parent.WriteUnlock()
+				cur.WriteUnlock()
+				continue batchLoop
 			}
 
-			curEndVersion, needRestart := cur.GetVersion()
-			if needRestart || (curVersion != curEndVersion) {
+			curEndVersion, cNeedRestart2 := cur.GetVersion()
+			if cNeedRestart2 || (curVersion != curEndVersion) {
+				// 解锁 child & parent & cur -> 重启
 				child.WriteUnlock()
-				restart = true
-				break
+				parent.WriteUnlock()
+				cur.WriteUnlock()
+				continue batchLoop
 			}
-
+			// 解锁 parent
+			parent.WriteUnlock()
+			cur.WriteUnlock()
 			// 下探
 			cur = child
 			curVersion = childVersion
 
-			// 解锁 parent
-			parent.WriteUnlock()
+		}
 
-			if restart {
+		// 此时 cur.GetLevel() == prev.GetLevel() + 1
+		// 3) 移动到与keys[0] 更匹配的兄弟节点 (若有)
+		for cur.GetSiblingPtr() != nil && compareIntKeys(cur.GetHighKey(), keys[0]) < 0 {
+			sibling := cur.GetSiblingPtr()
+			siblingVersion, sNeedRestart := sibling.TryReadLock()
+			if sNeedRestart {
+				// 解锁 cur -> 重启
 				cur.WriteUnlock()
 				continue batchLoop
 			}
-		}
 
-		if restart {
-			cur.WriteUnlock()
-			continue batchLoop
-		}
-
-		// 移动到与keys[0]更匹配的兄弟节点(若有)
-		for cur.GetSiblingPtr() != nil && compareIntKeys(cur.GetHighKey(), keys[0]) < 0 {
-			sibling := cur.GetSiblingPtr()
-			siblingVersion, needRestart := sibling.TryReadLock()
-			if needRestart {
-				restart = true
-				break
-			}
-
-			curEndVersion, needRestart := cur.GetVersion()
-			if needRestart || (curVersion != curEndVersion) {
+			curEndVersion, cNeedRestart2 := cur.GetVersion()
+			if cNeedRestart2 || (curVersion != curEndVersion) {
 				sibling.WriteUnlock()
-				restart = true
-				break
+				cur.WriteUnlock()
+				continue batchLoop
 			}
 
 			// 下一个兄弟
@@ -716,29 +733,25 @@ batchLoop:
 			curVersion = siblingVersion
 		}
 
-		if restart {
-			cur.WriteUnlock()
-			continue batchLoop
-		}
-
-		// 升级为写锁
-		parentNode, ok := cur.(*INode)
+		// 4) 尝试升级为写锁
+		parentNode, ok := cur.(INodeInterface)
 		if !ok {
-			panic("expected *INode")
+			cur.WriteUnlock()
+			panic("expected INodeInterface")
 		}
-		success, needRestart := parentNode.TryUpgradeWriteLock(curVersion)
-		if needRestart || !success {
-			restart = true
+		success, upNeedRestart := parentNode.TryUpgradeWriteLock(curVersion)
+		if upNeedRestart || !success {
 			cur.WriteUnlock()
 			continue batchLoop
 		}
 
-		// 解锁 prev
+		// 5) 解锁 prev
 		if prev.GetLevel() == 0 {
 			// 如果 prev 是叶子节点, 需要 obsolete
 			values[0].WriteUnlock() // 解锁 new leaf (?)
 			leaf, ok := prev.(LeafNodeInterface)
 			if !ok {
+				parentNode.WriteUnlock()
 				panic("expected LeafNodeInterface for prev")
 			}
 			leaf.WriteUnlockObsolete()
@@ -747,9 +760,10 @@ batchLoop:
 			prev.WriteUnlock()
 		}
 
-		// 进入批量插入逻辑
+		// 6) 进入批量插入逻辑
 		parent, ok := cur.(INodeInterface)
 		if !ok {
+			parentNode.WriteUnlock()
 			panic("expected INodeInterface for parent node")
 		}
 
@@ -761,9 +775,6 @@ batchLoop:
 			newNodes, err = parent.BatchInsertLastLevel(keys, values, num, 0)
 		} else {
 			// 内部节点
-			//fmt.Println("准备往高层inode插入新inode，新inode属性: ")
-			//printNode(values[0], "", false)
-			//bt.PrintTree()
 			newNodes, err = parent.BatchInsert(keys, values, num)
 		}
 		if err != nil {
@@ -801,7 +812,7 @@ batchLoop:
 
 			// 生成新根
 			newRoot := NewINodeForInsertInBatch(newNodes[0].GetLevel() + 1)
-			newRoot.InsertForRoot(splitKey, nodeInterfaceForINodeInterface(newNodes), parent.GetNode(), newNum)
+			newRoot.InsertForRoot(splitKey, nodeInterfaceForINodeInterface(newNodes), parent, newNum)
 			bt.root = newRoot
 			parent.WriteUnlock()
 		}
@@ -858,110 +869,99 @@ func nodeInterfaceSliceForBTreeNode(nodes []*LNodeBTree) []NodeInterface {
 func (bt *BTree) RangeLookup(minKey interface{}, rng int, ti *ThreadInfo) []interface{} {
 	eg := NewEpocheGuard(ti)
 	defer eg.Release()
-
+	//const maxAttempts = 100 // 你可以根据需求适当调大
+	//attempts := 0
 rangeLoop:
 	for {
-		restart := false
+		//attempts++
+		//if attempts > maxAttempts {
+		//	// 达到最大重试次数，防止无限循环
+		//	fmt.Printf("RangeLookup: too many attempts (%d). Abort this query.\n", attempts)
+		//	// 这里你可以选择返回空 slice、或返回nil、或抛出异常
+		//	return nil
+		//}
 		results := make([]interface{}, 0, rng) // 用来收集本次查询的结果
-
 		cur := bt.root
 		curVersion, needRestart := cur.TryReadLock()
 		if needRestart {
 			continue rangeLoop
 		}
 
-		// 如果发生 restart，需要释放 cur 的锁
-		defer func() {
-			if restart {
-				cur.WriteUnlock()
-			}
-		}()
-
 		// 1) 从根下探到叶子
 		for cur.GetLevel() != 0 {
 			parent, ok := cur.(INodeInterface)
 			if !ok {
-				panic("Need INodeInterface")
+				cur.WriteUnlock()
+				panic(fmt.Sprintf("Need INodeInterface, got: %T (%v)", cur, reflect.TypeOf(cur)))
 			}
 			child := parent.ScanNode(minKey)
 			if child == nil {
+				parent.WriteUnlock()
+				cur.WriteUnlock()
 				panic("ScanNode returned nil")
 			}
-			childVersion, needRestart := child.TryReadLock()
-			if needRestart {
+			childVersion, childNeedRestart := child.TryReadLock()
+			if childNeedRestart {
+				//fmt.Println("need loop, childVersion: ", childVersion)
 				parent.WriteUnlock()
-				restart = true
-				break
-			}
-
-			// Check version consistency
-			curEndVersion, needRestart := cur.GetVersion()
-			if needRestart || (curVersion != curEndVersion) {
-				parent.WriteUnlock()
-				child.WriteUnlock()
-				restart = true
-				break
-			}
-
-			// 下探到 child
-			cur = child
-			curVersion = childVersion
-
-			// 释放父节点
-			parent.WriteUnlock()
-
-			if restart {
 				cur.WriteUnlock()
 				continue rangeLoop
 			}
-		}
 
-		if restart {
-			// 表示在下探过程中要重启
+			// Check version consistency
+			curEndVersion, curNeedRestart := cur.GetVersion()
+			if curNeedRestart || (curVersion != curEndVersion) {
+				child.WriteUnlock()
+				parent.WriteUnlock()
+				cur.WriteUnlock()
+				//fmt.Println("need loop, curEndVersion: ", curEndVersion)
+				continue rangeLoop
+			}
+			// 释放父节点
+			parent.WriteUnlock()
 			cur.WriteUnlock()
-			continue rangeLoop
+			// 下探到 child
+			cur = child
+			curVersion = childVersion
 		}
 
 		// 2) 此时 cur 为叶节点
 		leaf, ok := cur.(LeafNodeInterface)
 		if !ok {
-			panic("expected LeafNodeInterface")
+			cur.WriteUnlock()
+			panic(fmt.Sprintf("expected LeafNodeInterface, got %T", cur))
 		}
 		leafVersion := curVersion
 		continued := false
+
 		// 3) 不断在当前或兄弟节点中收集，直到 results >= rng
 		for len(results) < rng {
 			// a) 如果当前叶节点的HighKey < minKey，则说明要去兄弟节点
 			for leaf.GetSiblingPtr() != nil && compareIntKeys(leaf.GetHighKey(), minKey) < 0 {
 				sibling := leaf.GetSiblingPtr()
-				siblingVersion, needRestart := sibling.TryReadLock()
-				if needRestart {
+				siblingVersion, sibRestart := sibling.TryReadLock()
+				if sibRestart {
 					leaf.WriteUnlock()
-					restart = true
-					break
+					//fmt.Println("need loop, siblingVersion: ", siblingVersion)
+					continue rangeLoop
 				}
 
-				leafEndVersion, needRestart := leaf.GetVersion()
-				if needRestart || (leafVersion != leafEndVersion) {
+				leafEndVersion, leafNeedRestart := leaf.GetVersion()
+				if leafNeedRestart || (leafVersion != leafEndVersion) {
+					//fmt.Println("need loop, leafNeedRestart: ", leafNeedRestart)
 					sibling.WriteUnlock()
 					leaf.WriteUnlock()
-					restart = true
-					break
+					continue rangeLoop
 				}
-
-				lf, ok := sibling.(LeafNodeInterface)
-				if !ok {
-					panic("expected LeafNodeInterface")
-				}
-
 				// 切换到 sibling
 				leaf.WriteUnlock()
+				lf, ok := sibling.(LeafNodeInterface)
+				if !ok {
+					sibling.WriteUnlock()
+					panic("expected LeafNodeInterface")
+				}
 				leaf = lf
 				leafVersion = siblingVersion
-			}
-
-			if restart {
-				continue rangeLoop
 			}
 
 			// b) 调用叶节点的 RangeLookUp
@@ -995,6 +995,7 @@ rangeLoop:
 			sibling := leaf.GetSiblingPtr()
 			leafEndVersion, needRestart := leaf.GetVersion()
 			if needRestart || (leafVersion != leafEndVersion) {
+				// 版本变化 -> 解锁 -> 重启
 				leaf.WriteUnlock()
 				continue rangeLoop
 			}
@@ -1006,15 +1007,17 @@ rangeLoop:
 			}
 
 			// 切换到 sibling
-			siblingVersion, needRestart := sibling.TryReadLock()
-			if needRestart {
+			siblingVersion, sibRestart := sibling.TryReadLock()
+			if sibRestart {
 				leaf.WriteUnlock()
+				//fmt.Println("need loop, siblingVersion: ", siblingVersion)
 				continue rangeLoop
 			}
-			leafEndVersion, needRestart = leaf.GetVersion()
-			if needRestart || (leafVersion != leafEndVersion) {
+			leafEndVersion, leafNeedRestart := leaf.GetVersion()
+			if leafNeedRestart || (leafVersion != leafEndVersion) {
 				sibling.WriteUnlock()
 				leaf.WriteUnlock()
+				//fmt.Println("need loop, leafNeedRestart: ", leafNeedRestart)
 				continue rangeLoop
 			}
 
@@ -1022,12 +1025,14 @@ rangeLoop:
 
 			lf, ok := sibling.(LeafNodeInterface)
 			if !ok {
+				sibling.WriteUnlock()
 				panic("expected LeafNodeInterface")
 			}
 			leaf = lf
 			leafVersion = siblingVersion
 		}
 
+		// 如果循环退出时 results>=rng 或无兄弟 => 结束
 		leaf.WriteUnlock()
 		return results
 	}
@@ -1041,7 +1046,7 @@ func (bt *BTree) convert(leaf LeafNodeInterface, leafVersion uint64, ti *ThreadI
 	}
 	bTreeNodes, num, err := hashNode.Convert(leafVersion)
 	if err != nil {
-		panic(err)
+		return false
 	}
 	if bTreeNodes == nil {
 		return false
